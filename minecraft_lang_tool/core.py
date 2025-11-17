@@ -1061,3 +1061,33 @@ Provide a clear, concise analysis:"""
         
         else:
             return {'error': f'Unknown operation: {operation}'}
+
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) != 2:
+        print("Usage: python core.py '<json_config>'", file=sys.stderr)
+        print("\nExample:", file=sys.stderr)
+        print('  python core.py \'{"operation":"analyze","input_file":"test.lang"}\'', file=sys.stderr)
+        print("\nAvailable operations: analyze, strip, improve, quiz, ai_analyze", file=sys.stderr)
+        print("\nRequired JSON parameters:", file=sys.stderr)
+        print("  - operation: Operation to perform", file=sys.stderr)
+        print("  - input_file: Path to .lang, .mcworld, or .mctemplate file", file=sys.stderr)
+        print("\nOptional JSON parameters:", file=sys.stderr)
+        print("  - cache_dir: Cache directory (default: .mc_lang_cache)", file=sys.stderr)
+        print("  - output_file: Output file path (for strip/improve operations)", file=sys.stderr)
+        print("  - output_dir: Output directory (for quiz operation)", file=sys.stderr)
+        print("  - model_name: Ollama model name (default: phi4)", file=sys.stderr)
+        print("  - target_age: Target age for improve/quiz (default: 10)", file=sys.stderr)
+        sys.exit(1)
+    
+    # Get JSON config from first and only argument
+    config_json = sys.argv[1]
+    
+    # Initialize tool and process
+    tool = MinecraftLangTool()
+    result = tool.process_from_config(config_json)
+    
+    # Print results as formatted JSON to stdout
+    print(json.dumps(result, indent=2))
