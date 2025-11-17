@@ -3,7 +3,7 @@
 	"filters": [
 		{
 			"runWith": "python",
-			"script": "./minecraft_lang_tool.py",
+			"script": "./core.py",
 			"name": "minecraft_lang_tool"
 		}
 	]
