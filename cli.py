@@ -109,6 +109,39 @@ def select_ollama_model(tool: MinecraftLangTool) -> str:
     return models[model_choice - 1]
 
 
+def _display_operation_results(result: dict):
+    """Helper function to display operation results."""
+    if result['operation'] == 'strip':
+        click.echo(f"  Output file: {result['output_file']}")
+        click.echo(f"  Removed lines: {result['removed_lines']}")
+    
+    elif result['operation'] == 'analyze':
+        analysis = result['analysis']
+        click.echo(f"\n📊 Text Complexity Analysis:")
+        click.echo(f"  Grade Level: {analysis['grade_level']}")
+        click.echo(f"  Age Range: {analysis['age_range']}")
+        click.echo(f"  Difficulty: {analysis['difficulty']}")
+        click.echo(f"\n  Flesch Reading Ease: {analysis['flesch_reading_ease']}")
+        click.echo(f"  Flesch-Kincaid Grade: {analysis['flesch_kincaid_grade']}")
+        click.echo(f"  Total Words: {analysis['total_words']}")
+        click.echo(f"  Unique Words: {analysis['unique_words']}")
+    
+    elif result['operation'] == 'improve':
+        click.echo(f"  Output file: {result['output_file']}")
+        click.echo(f"  Changelog: {result['changelog_file']}")
+        click.echo(f"  Lines processed: {result['lines_processed']}")
+        click.echo(f"  Lines improved: {result['lines_improved']}")
+    
+    elif result['operation'] == 'quiz':
+        click.echo(f"  Quiz file: {result['quiz_file']}")
+        click.echo(f"  Answer key: {result['answer_key_file']}")
+    
+    elif result['operation'] == 'ai_analyze':
+        click.echo(f"\n🤖 AI Analysis ({result['model']}):")
+        click.echo(f"  Samples analyzed: {result['samples_analyzed']}")
+        click.echo(f"\n{result['analysis']}")
+
+
 # ============================================================================
 # CLI Commands
 # ============================================================================
@@ -121,6 +154,7 @@ def cli():
 
 @cli.command()
 @click.argument('config_file', type=click.Path(exists=True), required=False)
+@click.option('--config-json', help='JSON configuration as string')
 @click.option('--operation', type=click.Choice(['strip', 'analyze', 'improve', 'quiz', 'ai_analyze']), 
               help='Operation to perform')
 @click.option('--input-file', type=click.Path(exists=True), help='Input file path')
@@ -128,18 +162,44 @@ def cli():
 @click.option('--cache-dir', default='.mc_lang_cache', help='Cache directory')
 @click.option('--model-name', help='Ollama model name')
 @click.option('--target-age', type=int, help='Target age for improvement/quiz')
-def run(config_file, operation, input_file, output_file, cache_dir, model_name, target_age):
+def run(config_file, config_json, operation, input_file, output_file, cache_dir, model_name, target_age):
     """
-    Run processing with JSON config file or CLI arguments.
+    Run processing with JSON config file, JSON string, or CLI arguments.
     
     Examples:
         # Using config file
         python cli.py run config.json
         
+        # Using JSON string
+        python cli.py run --config-json '{"operation":"analyze","input_file":"world.mcworld"}'
+        
         # Using CLI arguments
         python cli.py run --operation analyze --input-file world.mcworld
     """
     tool = MinecraftLangTool(cache_dir=cache_dir)
+    
+    if config_json:
+        # Use JSON string directly
+        click.echo(f"Processing with JSON configuration string")
+        result = tool.process_from_config(config_json)
+        
+        # Display results (same code as below but we return early)
+        click.echo("\n" + "="*60)
+        click.echo("RESULTS")
+        click.echo("="*60)
+        
+        if result.get('success'):
+            click.echo("✓ Operation completed successfully")
+            _display_operation_results(result)
+        else:
+            click.echo(f"✗ Error: {result.get('error', 'Unknown error')}")
+        
+        # Save results to JSON
+        output_json = Path(cache_dir) / "last_result.json"
+        with open(output_json, 'w') as f:
+            json.dump(result, f, indent=2)
+        click.echo(f"\nFull results saved to: {output_json}")
+        return
     
     if config_file:
         # Load configuration from JSON file
@@ -165,9 +225,10 @@ def run(config_file, operation, input_file, output_file, cache_dir, model_name, 
         if target_age:
             config['target_age'] = target_age
     
-    # Process with core module
+    # Process with core module (pass JSON as string)
     click.echo(f"\nProcessing operation: {config['operation']}")
-    result = tool.process_from_config(config)
+    config_json = json.dumps(config)
+    result = tool.process_from_config(config_json)
     
     # Display results
     click.echo("\n" + "="*60)
@@ -176,38 +237,7 @@ def run(config_file, operation, input_file, output_file, cache_dir, model_name, 
     
     if result.get('success'):
         click.echo("✓ Operation completed successfully")
-        
-        # Display operation-specific results
-        if result['operation'] == 'strip':
-            click.echo(f"  Output file: {result['output_file']}")
-            click.echo(f"  Removed lines: {result['removed_lines']}")
-        
-        elif result['operation'] == 'analyze':
-            analysis = result['analysis']
-            click.echo(f"\n📊 Text Complexity Analysis:")
-            click.echo(f"  Grade Level: {analysis['grade_level']}")
-            click.echo(f"  Age Range: {analysis['age_range']}")
-            click.echo(f"  Difficulty: {analysis['difficulty']}")
-            click.echo(f"\n  Flesch Reading Ease: {analysis['flesch_reading_ease']}")
-            click.echo(f"  Flesch-Kincaid Grade: {analysis['flesch_kincaid_grade']}")
-            click.echo(f"  Total Words: {analysis['total_words']}")
-            click.echo(f"  Unique Words: {analysis['unique_words']}")
-        
-        elif result['operation'] == 'improve':
-            click.echo(f"  Output file: {result['output_file']}")
-            click.echo(f"  Changelog: {result['changelog_file']}")
-            click.echo(f"  Lines processed: {result['lines_processed']}")
-            click.echo(f"  Lines improved: {result['lines_improved']}")
-        
-        elif result['operation'] == 'quiz':
-            click.echo(f"  Quiz file: {result['quiz_file']}")
-            click.echo(f"  Answer key: {result['answer_key_file']}")
-        
-        elif result['operation'] == 'ai_analyze':
-            click.echo(f"\n🤖 AI Analysis ({result['model']}):")
-            click.echo(f"  Samples analyzed: {result['samples_analyzed']}")
-            click.echo(f"\n{result['analysis']}")
-    
+        _display_operation_results(result)
     else:
         click.echo(f"✗ Error: {result.get('error', 'Unknown error')}")
     

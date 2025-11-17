@@ -13,6 +13,7 @@ Copyright (c) 2025 Justin Edwards
 """
 
 import re
+import json
 import time
 import zipfile
 import subprocess
@@ -926,15 +927,15 @@ Provide a clear, concise analysis:"""
                 "samples_analyzed": len(text_samples)
             }
     
-    def process_from_config(self, config: Dict) -> Dict:
+    def process_from_config(self, config_json: str) -> Dict:
         """
         Main entry point for processing with JSON configuration.
         
-        This method is designed for Regolith integration and accepts all
-        parameters as a JSON configuration dictionary.
+        This method is designed for Regolith integration and accepts
+        parameters as a JSON string.
         
         Args:
-            config: Dictionary containing:
+            config_json: JSON string containing:
                 - operation: str (required) - One of: 'strip', 'analyze', 'improve', 'quiz', 'ai_analyze'
                 - input_file: str (required) - Path to input file (.mcworld/.mctemplate/.lang)
                 - cache_dir: str (optional) - Cache directory path
@@ -945,6 +946,11 @@ Provide a clear, concise analysis:"""
         Returns:
             dict: Results of the operation including output paths and statistics
         """
+        try:
+            config = json.loads(config_json)
+        except json.JSONDecodeError as e:
+            return {'error': f'Invalid JSON configuration: {str(e)}', 'success': False}
+        
         operation = config.get('operation')
         input_file = config.get('input_file')
         
