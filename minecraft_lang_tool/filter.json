@@ -1,0 +1,10 @@
+{
+	"description": "A filter for extracting and processing Minecraft '.lang' files from '.mcworld' and '.mctemplate' archives, with AI-powered educational features.",
+	"filters": [
+		{
+			"runWith": "python",
+			"script": "./minecraft_lang_tool.py",
+			"name": "minecraft_lang_tool"
+		}
+	]
+}
