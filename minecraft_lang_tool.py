@@ -956,6 +956,17 @@ class MinecraftLangTool:
         except Exception as e:
             return {'error': f"Failed to create changelog file: {str(e)}"}
         
+        # Load context file if available
+        context_text = self._load_context_file(Path(lang_path))
+        context_summary = ""
+        if context_text:
+            click.echo("[Using game context file for enhanced improvements]")
+            # Extract just the summary section
+            if "CONTEXT SUMMARY:" in context_text:
+                context_summary = context_text.split("CONTEXT SUMMARY:")[1].split("="*60)[0].strip()
+                # Keep it concise for the prompt
+                context_summary = context_summary[:300] + "..." if len(context_summary) > 300 else context_summary
+        
         # Create a progress indicator
         spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         spinner_index = [0]
@@ -1043,7 +1054,8 @@ class MinecraftLangTool:
                     continue
                 
                 if word_count >= 5:
-                    prompt = f"""You are improving text in a Minecraft educational game for a {target_age}-year-old player.
+                    context_prefix = f"\nGame context: {context_summary}\n" if context_summary else ""
+                    prompt = f"""You are improving text in a Minecraft educational game for a {target_age}-year-old player.{context_prefix}
 
 Original text: "{clean_value}"
 
@@ -1062,7 +1074,8 @@ CRITICAL RULES:
 
 Response (either "KEEP_ORIGINAL" or the improved text only):"""
                 else:
-                    prompt = f"""You are improving text in a Minecraft educational game for a {target_age}-year-old player.
+                    context_prefix = f"\nGame context: {context_summary}\n" if context_summary else ""
+                    prompt = f"""You are improving text in a Minecraft educational game for a {target_age}-year-old player.{context_prefix}
 
 Original text: "{clean_value}"
 
@@ -1330,11 +1343,22 @@ Response (either "KEEP_ORIGINAL" or the improved text only):"""
         if not narrative_texts:
             return {'error': "No narrative text found in lang file"}
         
+        # Load context file if available
+        lang_path_obj = Path(lang_path)
+        context_text = self._load_context_file(lang_path_obj)
+        context_section = ""
+        if context_text:
+            click.echo("[Using game context file for enhanced quiz generation]")
+            # Extract just the summary section
+            if "CONTEXT SUMMARY:" in context_text:
+                context_summary = context_text.split("CONTEXT SUMMARY:")[1].split("="*60)[0].strip()
+                context_section = f"\n\nGAME CONTEXT:\n{context_summary}\n"
+        
         # Combine narrative text for context
         narrative_sample = '\n'.join(narrative_texts[:100])  # Use first 100 entries
         
         # Create quiz using AI
-        prompt = f"""You are creating a 10-question multiple choice quiz for a {target_age}-year-old student based on this educational Minecraft game narrative.
+        prompt = f"""You are creating a 10-question multiple choice quiz for a {target_age}-year-old student based on this educational Minecraft game narrative.{context_section}
 
 GAME NARRATIVE:
 {narrative_sample}
@@ -1467,6 +1491,233 @@ Generate the quiz now:"""
             'answer_key_file': str(answer_key_path)
         }
     
+    def create_context_file(self, lang_path: Path, model_name: str) -> Dict:
+        """
+        Create a game context file through AI-generated questions.
+        
+        Uses AI to generate 5 relevant questions about the game, captures user
+        responses, and consolidates them into a context file. This context is
+        then used to enhance all AI operations (content analysis, quiz generation,
+        text improvement).
+        
+        Args:
+            lang_path: Path to the lang file (used to determine context file location)
+            model_name: Name of the Ollama model to use (e.g., 'phi4')
+            
+        Returns:
+            dict: Results including:
+                - context_file: Path to the created context file
+                - questions: List of questions asked
+                - answers: List of user answers
+                - error: Error message if creation failed
+        """
+        lang_path_obj = Path(lang_path)
+        
+        # Store context file next to lang file
+        context_filename = lang_path_obj.stem + "_context.txt"
+        context_path = lang_path_obj.parent / context_filename
+        
+        # Check if context file already exists
+        if context_path.exists():
+            if not click.confirm(f"\nContext file already exists. Overwrite?", default=False):
+                return {
+                    'context_file': str(context_path),
+                    'status': 'cancelled',
+                    'message': 'User chose not to overwrite existing context file'
+                }
+        
+        click.echo("\n" + "="*60)
+        click.echo("Creating Game Context File")
+        click.echo("="*60)
+        click.echo("\nThe AI will generate 5 questions about your game to better")
+        click.echo("understand its educational content, theme, and target audience.")
+        click.echo("This context will improve all AI-powered features.\n")
+        
+        # First, sample some text from the lang file to help AI generate relevant questions
+        text_samples = []
+        try:
+            with open(lang_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    stripped = line.strip()
+                    if '=' in stripped and not stripped.startswith('#'):
+                        parts = stripped.split('=', 1)
+                        if len(parts) == 2:
+                            value = parts[1].strip()
+                            if value and len(value) > 10:
+                                # Clean the text
+                                clean_value = re.sub(r'§[0-9a-fk-or]', '', value)
+                                clean_value = re.sub(r'%[0-9]+\$?[sdifgx]', '', clean_value)
+                                clean_value = re.sub(r':_input_key\..*?:', '', clean_value)
+                                clean_value = clean_value.strip()
+                                if clean_value:
+                                    text_samples.append(clean_value)
+                        
+                        if len(text_samples) >= 50:
+                            break
+        except Exception as e:
+            return {'error': f"Failed to read lang file: {str(e)}"}
+        
+        if not text_samples:
+            return {'error': "No text content found in lang file"}
+        
+        # Generate questions using AI
+        click.echo("Generating questions about your game...")
+        
+        sample_text = "\n".join(text_samples[:30])
+        
+        question_prompt = f"""Based on this text from an educational Minecraft game, generate exactly 5 important questions that would help understand the game's educational content, theme, objectives, and target audience.
+
+Game text samples:
+{sample_text}
+
+Generate 5 questions that will help understand:
+1. The educational topic/subject (e.g., sustainability, history, science)
+2. The game's learning objectives
+3. Target student age/grade level
+4. Key concepts or skills being taught
+5. The narrative or gameplay context
+
+Format your response as exactly 5 questions, one per line, numbered 1-5.
+Make questions clear and specific. Do not include any other text."""
+
+        try:
+            result = subprocess.run(
+                ['ollama', 'run', model_name, question_prompt],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            if result.returncode != 0:
+                return {'error': f"Ollama failed: {result.stderr}"}
+            
+            questions_text = result.stdout.strip()
+            
+            # Parse questions
+            questions = []
+            for line in questions_text.split('\n'):
+                line = line.strip()
+                if line and any(line.startswith(f"{i}.") for i in range(1, 6)):
+                    # Remove the number prefix
+                    question = re.sub(r'^\d+\.\s*', '', line)
+                    if question:
+                        questions.append(question)
+            
+            if len(questions) < 5:
+                return {'error': f"AI generated only {len(questions)} questions. Expected 5."}
+            
+            questions = questions[:5]  # Ensure exactly 5
+            
+        except subprocess.TimeoutExpired:
+            return {'error': "Question generation timed out"}
+        except Exception as e:
+            return {'error': f"Failed to generate questions: {str(e)}"}
+        
+        # Ask user the questions and capture answers
+        click.echo("\n" + "="*60)
+        click.echo("Please answer the following questions about your game:")
+        click.echo("="*60 + "\n")
+        
+        answers = []
+        for i, question in enumerate(questions, 1):
+            click.echo(f"Question {i}:")
+            click.echo(f"  {question}")
+            answer = click.prompt("Your answer", type=str)
+            answers.append(answer)
+            click.echo()
+        
+        # Consolidate into context using AI
+        click.echo("Creating consolidated context file...")
+        
+        qa_text = "\n\n".join([f"Q: {q}\nA: {a}" for q, a in zip(questions, answers)])
+        
+        consolidation_prompt = f"""You are creating a context file for an educational Minecraft game. Based on the following questions and answers, write a comprehensive but concise context summary (200-300 words) that captures:
+
+1. The educational topic and subject matter
+2. Learning objectives and key concepts
+3. Target audience (age/grade level)
+4. Gameplay narrative and context
+5. How the game teaches or reinforces learning
+
+Questions and Answers:
+{qa_text}
+
+Write a clear, informative context summary that will help AI understand this game when analyzing content, generating quizzes, or improving text. Use a professional educational tone. Do not include section headers - write as flowing paragraphs."""
+
+        try:
+            result = subprocess.run(
+                ['ollama', 'run', model_name, consolidation_prompt],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            if result.returncode != 0:
+                return {'error': f"Context consolidation failed: {result.stderr}"}
+            
+            context_summary = result.stdout.strip()
+            
+            # Save context file
+            with open(context_path, 'w', encoding='utf-8') as f:
+                f.write("="*60 + "\n")
+                f.write("GAME CONTEXT FILE\n")
+                f.write("="*60 + "\n")
+                f.write(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Model: {model_name}\n")
+                f.write(f"Source: {lang_path_obj.name}\n")
+                f.write("="*60 + "\n\n")
+                
+                f.write("CONTEXT SUMMARY:\n")
+                f.write("-"*60 + "\n")
+                f.write(context_summary)
+                f.write("\n\n")
+                
+                f.write("="*60 + "\n")
+                f.write("ORIGINAL QUESTIONS & ANSWERS:\n")
+                f.write("="*60 + "\n\n")
+                
+                for i, (q, a) in enumerate(zip(questions, answers), 1):
+                    f.write(f"Question {i}: {q}\n")
+                    f.write(f"Answer: {a}\n\n")
+            
+            click.echo("\nContext file created successfully!")
+            click.echo(f"Location: {context_path}")
+            
+            return {
+                'context_file': str(context_path),
+                'questions': questions,
+                'answers': answers,
+                'summary': context_summary,
+                'status': 'success'
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {'error': "Context consolidation timed out"}
+        except Exception as e:
+            return {'error': f"Failed to create context file: {str(e)}"}
+    
+    def _load_context_file(self, lang_path: Path) -> Optional[str]:
+        """
+        Load context file if it exists.
+        
+        Args:
+            lang_path: Path to the lang file
+            
+        Returns:
+            Context text if file exists, None otherwise
+        """
+        lang_path_obj = Path(lang_path)
+        context_filename = lang_path_obj.stem + "_context.txt"
+        context_path = lang_path_obj.parent / context_filename
+        
+        if context_path.exists():
+            try:
+                with open(context_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            except Exception:
+                return None
+        return None
+    
     def analyze_with_ollama(self, lang_path: Path, model: str) -> Dict:
         """Use Ollama to analyze game content from player-facing text."""
         # Extract player-facing text
@@ -1562,11 +1813,22 @@ Generate the quiz now:"""
         if not text_samples:
             return {"error": "No player-facing text found"}
         
+        # Load context file if available
+        context_text = self._load_context_file(lang_path)
+        context_section = ""
+        if context_text:
+            click.echo("[Using game context file for enhanced analysis]")
+            # Extract just the summary section
+            if "CONTEXT SUMMARY:" in context_text:
+                context_section = context_text.split("CONTEXT SUMMARY:")[1].split("="*60)[0].strip()
+                context_section = f"\n\nGAME CONTEXT:\n{context_section}\n"
+        
         # Prepare prompt for Ollama
         sample_text = '\n'.join(text_samples[:100])  # Use first 100 samples
         
-        prompt = f"""You are analyzing a Minecraft world/game based on its language file text entries. 
-Below are player-facing text strings from the game. Based on these strings, provide:
+        prompt = f"""You are analyzing a Minecraft world/game based on its language file text entries.{context_section}
+
+Below are player-facing text strings from the game. Based on these strings{' and the provided context' if context_text else ''}, provide:
 
 1. A brief description of what this Minecraft world/game is about (2-3 sentences)
 2. The main theme or educational focus (if any)
@@ -1647,6 +1909,221 @@ Provide a clear, concise analysis. For age group, be specific and base it solely
                 "error": f"Unexpected error: {str(e)}",
                 "samples_analyzed": len(text_samples)
             }
+
+
+def check_ollama_installed() -> bool:
+    """Check if Ollama is installed on the system."""
+    try:
+        result = subprocess.run(
+            ['which', 'ollama'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def get_ollama_installation_instructions() -> str:
+    """Get platform-specific Ollama installation instructions."""
+    import platform
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        return """
+Ollama Installation for macOS:
+
+Option 1: Download from website (Recommended)
+   1. Visit https://ollama.ai
+   2. Click "Download for Mac"
+   3. Open the downloaded .dmg file
+   4. Drag Ollama to Applications
+   5. Open Ollama from Applications
+
+Option 2: Install via Homebrew
+   Run: brew install ollama
+
+After installation:
+   1. Verify: ollama --version
+   2. Start Ollama: ollama serve
+   3. Install a model: ollama pull phi4
+   4. Return to this tool and try AI features!
+"""
+    elif system == "Linux":
+        return """
+Ollama Installation for Linux:
+
+Run this command in terminal:
+   curl -fsSL https://ollama.ai/install.sh | sh
+
+After installation:
+   1. Verify: ollama --version
+   2. Start Ollama: ollama serve
+   3. Install a model: ollama pull phi4
+   4. Return to this tool and try AI features!
+
+For more details, visit: https://ollama.ai
+"""
+    elif system == "Windows":
+        return """
+Ollama Installation for Windows:
+
+   1. Visit https://ollama.ai
+   2. Click "Download for Windows"
+   3. Run the installer
+   4. Follow installation prompts
+
+After installation:
+   1. Open PowerShell or Command Prompt
+   2. Verify: ollama --version
+   3. Install a model: ollama pull phi4
+   4. Return to this tool and try AI features!
+"""
+    else:
+        return """
+Ollama Installation:
+
+   1. Visit https://ollama.ai
+   2. Download the installer for your platform
+   3. Follow the installation instructions
+
+After installation:
+   1. Verify: ollama --version
+   2. Install a model: ollama pull phi4
+   3. Return to this tool and try AI features!
+"""
+
+
+def show_settings_menu(tool: MinecraftLangTool):
+    """Display and handle settings menu."""
+    while True:
+        click.echo("\n" + "="*50)
+        click.echo("SETTINGS")
+        click.echo("="*50)
+        
+        # Check Ollama status
+        ollama_installed = check_ollama_installed()
+        ollama_status = "Installed" if ollama_installed else "Not installed"
+        
+        click.echo(f"\nOllama Status: {ollama_status}")
+        
+        if ollama_installed:
+            # Get available models
+            models = tool.get_ollama_models()
+            if models:
+                click.echo(f"Available models: {len(models)}")
+                click.echo("   " + ", ".join(models[:5]))
+                if len(models) > 5:
+                    click.echo(f"   ... and {len(models) - 5} more")
+            else:
+                click.echo("No models installed yet")
+        
+        click.echo("\n" + "-"*50)
+        click.echo("1. Check Ollama installation")
+        click.echo("2. Install Ollama (instructions)")
+        click.echo("3. Install Ollama model")
+        click.echo("4. List installed models")
+        click.echo("0. Back to main menu")
+        
+        choice = click.prompt("\nSelect an option", type=int, default=0)
+        
+        if choice == 0:
+            break
+        elif choice == 1:
+            # Check Ollama installation
+            click.echo("\nChecking Ollama installation...")
+            if check_ollama_installed():
+                click.echo("[OK] Ollama is installed")
+                
+                # Try to get version
+                try:
+                    result = subprocess.run(
+                        ['ollama', '--version'],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode == 0:
+                        click.echo(f"Version: {result.stdout.strip()}")
+                except Exception:
+                    pass
+                
+                # Check for models
+                models = tool.get_ollama_models()
+                if models:
+                    click.echo(f"\n[OK] {len(models)} model(s) installed")
+                else:
+                    click.echo("\n[WARNING] No models installed")
+                    click.echo("Run 'ollama pull phi4' to install recommended model")
+            else:
+                click.echo("[NOT FOUND] Ollama is not installed")
+                click.echo("\nChoose option 2 for installation instructions")
+        
+        elif choice == 2:
+            # Show installation instructions
+            instructions = get_ollama_installation_instructions()
+            click.echo(instructions)
+            
+            if click.confirm("\nOpen Ollama website in browser?", default=False):
+                import webbrowser
+                webbrowser.open("https://ollama.ai")
+                click.echo("Opened https://ollama.ai in your browser")
+        
+        elif choice == 3:
+            # Install model
+            if not check_ollama_installed():
+                click.echo("\n[ERROR] Ollama is not installed")
+                click.echo("Please install Ollama first (option 2)")
+                continue
+            
+            click.echo("\nRecommended models:")
+            click.echo("   phi4        - Best for educational content (recommended)")
+            click.echo("   llama3.2    - Fast and capable")
+            click.echo("   gemma2:2b   - Lightweight and fast")
+            click.echo("   mistral     - Good general purpose")
+            
+            model_name = click.prompt("\nEnter model name to install", type=str, default="phi4")
+            
+            click.echo(f"\nInstalling {model_name}...")
+            click.echo("This may take several minutes depending on model size...")
+            
+            try:
+                result = subprocess.run(
+                    ['ollama', 'pull', model_name],
+                    capture_output=False,
+                    text=True,
+                    timeout=600  # 10 minute timeout
+                )
+                
+                if result.returncode == 0:
+                    click.echo(f"\n[OK] Successfully installed {model_name}")
+                else:
+                    click.echo(f"\n[ERROR] Failed to install {model_name}")
+            except subprocess.TimeoutExpired:
+                click.echo("\n[ERROR] Installation timed out")
+            except Exception as e:
+                click.echo(f"\n[ERROR] {str(e)}")
+        
+        elif choice == 4:
+            # List models
+            if not check_ollama_installed():
+                click.echo("\n[ERROR] Ollama is not installed")
+                continue
+            
+            click.echo("\nFetching installed models...")
+            models = tool.get_ollama_models()
+            
+            if models:
+                click.echo(f"\nInstalled models ({len(models)}):")
+                click.echo("-"*50)
+                for i, model in enumerate(models, 1):
+                    click.echo(f"{i}. {model}")
+                click.echo("-"*50)
+            else:
+                click.echo("\n[WARNING] No models installed")
+                click.echo("\nTo install a model, choose option 3")
+                click.echo("Recommended: phi4")
 
 
 def browse_downloads_folder() -> Optional[str]:
@@ -1756,451 +2233,516 @@ def process(input_file, cache_dir, downloads):
         click.echo("Supported types: .mcworld, .mctemplate, .lang")
         return
     
-    # Show menu of operations
-    click.echo("\n" + "="*50)
-    click.echo("OPERATIONS MENU")
-    click.echo("="*50)
-    click.echo("1. Strip non-player-facing text")
-    click.echo("2. Text complexity analysis")
-    click.echo("3. AI content analysis (using Ollama)")
-    click.echo("4. AI text improvement for target age (using Ollama)")
-    click.echo("5. Generate quiz from game narrative (using Ollama)")
-    click.echo("6. View full file contents")
-    click.echo("7. Get file statistics")
-    click.echo("0. Exit")
-    
-    choice = click.prompt("\nSelect an operation", type=int, default=1)
-    
-    if choice == 1:
-        # Strip non-player text
-        sanitized_stem = tool.sanitize_filename(lang_file.stem)
-        output_path = Path(cache_dir) / f"{sanitized_stem}_player_only.lang"
-        click.echo(f"\nStripping non-player-facing text...")
-        removed = tool.strip_non_player_text(lang_file, output_path)
-        click.echo(f"Removed {removed} lines")
-        click.echo(f"Output saved to: {output_path}")
+    # Main operations loop
+    while True:
+        # Show menu of operations
+        click.echo("\n" + "="*50)
+        click.echo("OPERATIONS MENU")
+        click.echo("="*50)
+        click.echo("1. Strip non-player-facing text")
+        click.echo("2. Text complexity analysis")
+        click.echo("3. Create game context file (using Ollama)")
+        click.echo("4. AI content analysis (using Ollama)")
+        click.echo("5. AI text improvement for target age (using Ollama)")
+        click.echo("6. Generate quiz from game narrative (using Ollama)")
+        click.echo("7. View full file contents")
+        click.echo("8. Get file statistics")
+        click.echo("9. Settings")
+        click.echo("0. Exit")
         
-        # Show preview of output
-        if click.confirm("\nPreview output file?", default=True):
-            preview = tool.preview_lang_file(output_path, lines=10)
-            click.echo("\nFirst 10 lines:")
-            for line in preview:
-                click.echo(f"  {line}")
-    
-    elif choice == 2:
-        # Text complexity analysis
+        choice = click.prompt("\nSelect an operation", type=int, default=1)
         
-        # Check if file appears to be en_US or English
-        filename_lower = lang_file.name.lower()
-        is_en_us = 'en_us' in filename_lower
-        is_english = is_en_us or any(pattern in filename_lower for pattern in ['en_gb', 'en_ca', 'en_au', 'en.lang', 'english'])
+        if choice == 0:
+            break
         
-        if not is_english:
-            click.echo("\nWARNING: This file does not appear to be English (en_US).")
-            click.echo("   Complexity analysis is designed for English text.")
-            click.echo("   Results may be inaccurate for other languages.\n")
-            if not click.confirm("Continue anyway?", default=False):
-                click.echo("Analysis cancelled.")
-                return
-        elif not is_en_us:
-            click.echo(f"\nNote: Analyzing {lang_file.name} (not en_US).")
-            click.echo("Results are most accurate with en_US files.\n")
+        elif choice == 1:
+            # Strip non-player text
+            sanitized_stem = tool.sanitize_filename(lang_file.stem)
+            output_path = Path(cache_dir) / f"{sanitized_stem}_player_only.lang"
+            click.echo(f"\nStripping non-player-facing text...")
+            removed = tool.strip_non_player_text(lang_file, output_path)
+            click.echo(f"Removed {removed} lines")
+            click.echo(f"Output saved to: {output_path}")
+            
+            # Show preview of output
+            if click.confirm("\nPreview output file?", default=True):
+                preview = tool.preview_lang_file(output_path, lines=10)
+                click.echo("\nFirst 10 lines:")
+                for line in preview:
+                    click.echo(f"  {line}")
         
-        click.echo(f"\nAnalyzing text complexity for player-facing content...")
-        click.echo("This may take a moment...\n")
-        
-        # Option to preview what text will be analyzed
-        if click.confirm("Preview sample of text that will be analyzed?", default=False):
-            preview_texts = tool._get_preview_analyzed_text(lang_file, lines=20)
-            if preview_texts:
-                click.echo("\nSample of text being analyzed:")
-                click.echo("-" * 60)
-                for i, text in enumerate(preview_texts, 1):
-                    click.echo(f"{i}. {text}")
-                click.echo("-" * 60)
-                if not click.confirm("\nContinue with full analysis?", default=True):
+        elif choice == 2:
+            # Text complexity analysis
+            
+            # Check if file appears to be en_US or English
+            filename_lower = lang_file.name.lower()
+            is_en_us = 'en_us' in filename_lower
+            is_english = is_en_us or any(pattern in filename_lower for pattern in ['en_gb', 'en_ca', 'en_au', 'en.lang', 'english'])
+            
+            if not is_english:
+                click.echo("\nWARNING: This file does not appear to be English (en_US).")
+                click.echo("   Complexity analysis is designed for English text.")
+                click.echo("   Results may be inaccurate for other languages.\n")
+                if not click.confirm("Continue anyway?", default=False):
                     click.echo("Analysis cancelled.")
                     return
-            click.echo()
-        
-        analysis = tool.analyze_text_complexity(lang_file)
-        
-        if 'error' in analysis:
-            click.echo(f"Error: {analysis['error']}")
-        else:
-            # Display results
-            click.echo("="*70)
-            click.echo("TEXT COMPLEXITY ANALYSIS REPORT")
-            click.echo("="*70)
+            elif not is_en_us:
+                click.echo(f"\nNote: Analyzing {lang_file.name} (not en_US).")
+                click.echo("Results are most accurate with en_US files.\n")
             
-            click.echo(f"\nBASIC STATISTICS")
-            click.echo(f"   Player-facing text entries analyzed: {analysis['total_entries']:,}")
-            click.echo(f"   Technical entries skipped: {analysis['skipped_technical']:,}")
-            click.echo(f"   Total words: {analysis['total_words']:,}")
-            click.echo(f"   Unique words: {analysis['unique_words']:,}")
-            click.echo(f"   Total sentences: {analysis['total_sentences']:,}")
-            click.echo(f"   Average word length: {analysis['avg_word_length']} characters")
-            click.echo(f"   Average sentence length: {analysis['avg_sentence_length']} words")
-            click.echo(f"   Average syllables per word: {analysis['avg_syllables_per_word']}")
+            click.echo(f"\nAnalyzing text complexity for player-facing content...")
+            click.echo("This may take a moment...\n")
             
-            click.echo(f"\nREADABILITY METRICS")
-            click.echo(f"   Flesch Reading Ease: {analysis['flesch_reading_ease']}")
-            click.echo(f"      (0-100 scale, higher = easier)")
-            click.echo(f"   Flesch-Kincaid Grade: {analysis['flesch_kincaid_grade']}")
-            click.echo(f"   Gunning Fog Index: {analysis['gunning_fog_index']}")
-            if analysis['smog_index']:
-                click.echo(f"   SMOG Index: {analysis['smog_index']}")
-            else:
-                click.echo(f"   SMOG Index: N/A (requires 30+ sentences)")
-            click.echo(f"   Coleman-Liau Index: {analysis['coleman_liau_index']}")
-            click.echo(f"   Automated Readability Index: {analysis['automated_readability_index']}")
-            
-            click.echo(f"\nOVERALL ASSESSMENT")
-            click.echo(f"   Grade Level: {analysis['grade_level']}")
-            click.echo(f"   Target Age Range: {analysis['age_range']}")
-            click.echo(f"   Difficulty: {analysis['difficulty']}")
-            
-            click.echo(f"\nVOCABULARY COMPLEXITY")
-            vc = analysis['vocabulary_complexity']
-            click.echo(f"   Short words (1-3 chars): {vc['short_words_1_3']:,} ({vc['short_words_1_3']/analysis['total_words']*100:.1f}%)")
-            click.echo(f"   Medium words (4-6 chars): {vc['medium_words_4_6']:,} ({vc['medium_words_4_6']/analysis['total_words']*100:.1f}%)")
-            click.echo(f"   Long words (7+ chars): {vc['long_words_7_plus']:,} ({vc['long_words_7_plus']/analysis['total_words']*100:.1f}%)")
-            click.echo(f"   Complex words (3+ syllables): {vc['complex_words_3plus_syllables']:,} ({vc['complex_words_3plus_syllables']/analysis['total_words']*100:.1f}%)")
-            click.echo(f"   Lexical diversity: {vc['lexical_diversity']}")
-            click.echo(f"      (unique words / total words)")
-            
-            click.echo("\n" + "="*70)
-            
-            # Ask if user wants to save report
-            if click.confirm("\nSave detailed report to file?", default=False):
-                report_path = Path(cache_dir) / f"{lang_file.stem}_complexity_report.txt"
-                with open(report_path, 'w', encoding='utf-8') as f:
-                    f.write("TEXT COMPLEXITY ANALYSIS REPORT\n")
-                    f.write("="*70 + "\n")
-                    f.write(f"File: {lang_file.name}\n")
-                    f.write(f"Analysis Date: {Path(report_path).stat().st_mtime}\n\n")
-                    
-                    f.write("BASIC STATISTICS\n")
-                    f.write(f"  Player-facing text entries: {analysis['total_entries']:,}\n")
-                    f.write(f"  Total words: {analysis['total_words']:,}\n")
-                    f.write(f"  Unique words: {analysis['unique_words']:,}\n")
-                    f.write(f"  Total sentences: {analysis['total_sentences']:,}\n")
-                    f.write(f"  Average word length: {analysis['avg_word_length']} characters\n")
-                    f.write(f"  Average sentence length: {analysis['avg_sentence_length']} words\n")
-                    f.write(f"  Average syllables per word: {analysis['avg_syllables_per_word']}\n\n")
-                    
-                    f.write("READABILITY METRICS\n")
-                    f.write(f"  Flesch Reading Ease: {analysis['flesch_reading_ease']}\n")
-                    f.write(f"  Flesch-Kincaid Grade: {analysis['flesch_kincaid_grade']}\n")
-                    f.write(f"  Gunning Fog Index: {analysis['gunning_fog_index']}\n")
-                    f.write(f"  SMOG Index: {analysis['smog_index'] if analysis['smog_index'] else 'N/A'}\n")
-                    f.write(f"  Coleman-Liau Index: {analysis['coleman_liau_index']}\n")
-                    f.write(f"  Automated Readability Index: {analysis['automated_readability_index']}\n\n")
-                    
-                    f.write("OVERALL ASSESSMENT\n")
-                    f.write(f"  Grade Level: {analysis['grade_level']}\n")
-                    f.write(f"  Target Age Range: {analysis['age_range']}\n")
-                    f.write(f"  Difficulty: {analysis['difficulty']}\n\n")
-                    
-                    f.write("VOCABULARY COMPLEXITY\n")
-                    f.write(f"  Short words (1-3 chars): {vc['short_words_1_3']:,}\n")
-                    f.write(f"  Medium words (4-6 chars): {vc['medium_words_4_6']:,}\n")
-                    f.write(f"  Long words (7+ chars): {vc['long_words_7_plus']:,}\n")
-                    f.write(f"  Complex words (3+ syllables): {vc['complex_words_3plus_syllables']:,}\n")
-                    f.write(f"  Lexical diversity: {vc['lexical_diversity']}\n")
-                
-                click.echo(f"Report saved to: {report_path}")
-    
-    elif choice == 3:
-        # AI content analysis with Ollama
-        click.echo(f"\nAI Content Analysis using Ollama")
-        click.echo("="*60)
-        
-        # Check for Ollama and get models
-        click.echo("Checking for available Ollama models...")
-        models = tool.get_ollama_models()
-        
-        if not models:
-            click.echo("\nNo Ollama models found!")
-            click.echo("   Please install Ollama and download a model first.")
-            click.echo("   Visit: https://ollama.ai")
-            click.echo("\n   Quick start:")
-            click.echo("   1. Install Ollama")
-            click.echo("   2. Run: ollama pull llama3.2")
-            return
-        
-        click.echo(f"\nFound {len(models)} model(s):")
-        for idx, model in enumerate(models, 1):
-            # Add speed indicator based on model size
-            if any(size in model for size in ['70b', '72b', '90b', '405b']):
-                speed = "slow but thorough"
-            elif any(size in model for size in ['13b', '14b', '34b']):
-                speed = "moderate speed"
-            elif any(size in model for size in ['7b', '8b', '3b', '1b']):
-                speed = "fast"
-            else:
-                speed = ""
-            
-            if speed:
-                click.echo(f"   {idx}. {model} ({speed})")
-            else:
-                click.echo(f"   {idx}. {model}")
-        
-        # Let user select model
-        model_choice = click.prompt(
-            "\nSelect a model number",
-            type=int,
-            default=1
-        )
-        
-        if model_choice < 1 or model_choice > len(models):
-            click.echo("Invalid model selection.")
-            return
-        
-        selected_model = models[model_choice - 1]
-        
-        # Show model size/speed hint
-        if any(size in selected_model for size in ['70b', '72b', '90b', '405b']):
-            speed_hint = "Large model detected - may take 2-5 minutes"
-        elif any(size in selected_model for size in ['13b', '14b', '34b']):
-            speed_hint = "Medium model - typically 1-2 minutes"
-        else:
-            speed_hint = "Small model - typically 30-90 seconds"
-        
-        click.echo(f"\nUsing model: {selected_model}")
-        click.echo(f"{speed_hint}")
-        click.echo("\n" + "="*60)
-        click.echo("AI ANALYSIS IN PROGRESS")
-        click.echo("="*60)
-        click.echo("Step 1/2: Extracting player-facing text samples...")
-        click.echo("Step 2/2: Analyzing with AI...")
-        click.echo("           (Maximum wait time: 5 minutes)")
-        
-        # Run analysis (will show spinner during processing)
-        result = tool.analyze_with_ollama(lang_file, selected_model)
-        
-        click.echo("\nAnalysis complete!\n")
-        
-        if 'error' in result:
-            click.echo(f"\nError: {result['error']}")
-            if 'samples_analyzed' in result:
-                click.echo(f"   Text samples found: {result['samples_analyzed']}")
-        else:
-            click.echo("="*60)
-            click.echo("AI GAME CONTENT ANALYSIS")
-            click.echo("="*60)
-            click.echo(f"\nModel: {result['model']}")
-            click.echo(f"Text samples analyzed: {result['samples_analyzed']}")
-            click.echo("\n" + "-"*60)
-            click.echo(result['analysis'])
-            click.echo("-"*60)
-            
-            # Ask if user wants to save
-            if click.confirm("\nSave analysis to file?", default=False):
-                analysis_path = Path(cache_dir) / f"{lang_file.stem}_ai_analysis.txt"
-                with open(analysis_path, 'w', encoding='utf-8') as f:
-                    f.write("AI GAME CONTENT ANALYSIS\n")
-                    f.write("="*60 + "\n")
-                    f.write(f"File: {lang_file.name}\n")
-                    f.write(f"Model: {result['model']}\n")
-                    f.write(f"Text samples analyzed: {result['samples_analyzed']}\n")
-                    f.write("\n" + "-"*60 + "\n")
-                    f.write(result['analysis'])
-                    f.write("\n" + "-"*60 + "\n")
-                
-                click.echo(f"Analysis saved to: {analysis_path}")
-    
-    elif choice == 4:
-        # AI text improvement for target age
-        click.echo(f"\nAI Text Improvement for Target Age")
-        click.echo("="*60)
-        
-        # Check for Ollama and get models
-        click.echo("Checking for available Ollama models...")
-        models = tool.get_ollama_models()
-        
-        if not models:
-            click.echo("\nNo Ollama models found!")
-            click.echo("   Please install Ollama and download a model first.")
-            click.echo("   Visit: https://ollama.ai")
-            return
-        
-        click.echo(f"\nFound {len(models)} model(s):")
-        for idx, model in enumerate(models, 1):
-            if any(size in model for size in ['70b', '72b', '90b', '405b']):
-                speed = "slow but thorough"
-            elif any(size in model for size in ['13b', '14b', '34b']):
-                speed = "moderate speed"
-            elif any(size in model for size in ['7b', '8b', '3b', '1b']):
-                speed = "fast"
-            else:
-                speed = ""
-            
-            if speed:
-                click.echo(f"   {idx}. {model} ({speed})")
-            else:
-                click.echo(f"   {idx}. {model}")
-        
-        model_choice = click.prompt("\nSelect a model number", type=int, default=1)
-        
-        if model_choice < 1 or model_choice > len(models):
-            click.echo("Invalid model selection.")
-            return
-        
-        selected_model = models[model_choice - 1]
-        
-        # Get target age from user
-        target_age = click.prompt("\nEnter target age for text improvement (e.g., 8, 10, 12, 14)", type=int, default=10)
-        
-        click.echo(f"\nUsing model: {selected_model}")
-        click.echo(f"Target age: {target_age} years old")
-        click.echo("\nThis will:")
-        click.echo("  1. Analyze each line to determine if it's player-facing")
-        click.echo(f"  2. Improve text readability for age {target_age}")
-        click.echo("  3. Preserve all technical formatting and keys")
-        click.echo("  4. Generate a new lang file and changelog")
-        click.echo("\nNote: This may take several minutes for large files.")
-        click.echo("      You can monitor progress by opening the changelog file during processing.")
-        
-        if not click.confirm("\nProceed with AI text improvement?", default=True):
-            click.echo("Cancelled.")
-            return
-        
-        # Show changelog path before starting
-        lang_path_obj = Path(lang_file)
-        changelog_filename = lang_path_obj.stem + f"_changelog_age{target_age}.txt"
-        changelog_dir = lang_path_obj.parent / "improvements"
-        changelog_preview_path = changelog_dir / changelog_filename
-        
-        click.echo("\n" + "="*60)
-        click.echo("AI TEXT IMPROVEMENT IN PROGRESS")
-        click.echo("="*60)
-        click.echo(f"\nChangelog: file://{changelog_preview_path.absolute()}")
-        click.echo("(Click the link above to open and monitor progress)\n")
-        
-        result = tool.improve_text_for_age(lang_file, selected_model, target_age)
-        
-        if 'error' in result:
-            click.echo(f"\nError: {result['error']}")
-        else:
-            click.echo("\nImprovement complete!")
-            click.echo("="*60)
-            click.echo(f"Lines processed: {result['lines_processed']}")
-            click.echo(f"Lines improved: {result['lines_improved']}")
-            click.echo(f"Lines unchanged: {result['lines_unchanged']}")
-            click.echo(f"\nNew file: {result['output_file']}")
-            click.echo(f"Changelog: {result['changelog_file']}")
-            click.echo("="*60)
-            
-            # Show sample changes
-            if result['lines_improved'] > 0 and click.confirm("\nPreview sample changes?", default=True):
-                changelog_path = Path(result['changelog_file'])
-                with open(changelog_path, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                    preview_lines = min(20, len(lines))
-                    click.echo(f"\nFirst {preview_lines} lines of changelog:")
+            # Option to preview what text will be analyzed
+            if click.confirm("Preview sample of text that will be analyzed?", default=False):
+                preview_texts = tool._get_preview_analyzed_text(lang_file, lines=20)
+                if preview_texts:
+                    click.echo("\nSample of text being analyzed:")
                     click.echo("-" * 60)
-                    for line in lines[:preview_lines]:
-                        click.echo(line.rstrip())
-                    if len(lines) > preview_lines:
-                        click.echo(f"... ({len(lines) - preview_lines} more changes)")
+                    for i, text in enumerate(preview_texts, 1):
+                        click.echo(f"{i}. {text}")
                     click.echo("-" * 60)
-    
-    elif choice == 5:
-        # Generate quiz from game narrative
-        click.echo(f"\nGenerate Quiz from Game Narrative")
-        click.echo("="*60)
-        
-        # Check for Ollama and get models
-        click.echo("Checking for available Ollama models...")
-        models = tool.get_ollama_models()
-        
-        if not models:
-            click.echo("\nNo Ollama models found!")
-            click.echo("   Please install Ollama and download a model first.")
-            click.echo("   Visit: https://ollama.ai")
-            return
-        
-        click.echo(f"\nFound {len(models)} model(s):")
-        for idx, model in enumerate(models, 1):
-            if any(size in model for size in ['70b', '72b', '90b', '405b']):
-                speed = "slow but thorough"
-            elif any(size in model for size in ['13b', '14b', '34b']):
-                speed = "moderate speed"
-            elif any(size in model for size in ['7b', '8b', '3b', '1b']):
-                speed = "fast"
-            else:
-                speed = ""
+                    if not click.confirm("\nContinue with full analysis?", default=True):
+                        click.echo("Analysis cancelled.")
+                        return
+                click.echo()
             
-            if speed:
-                click.echo(f"   {idx}. {model} ({speed})")
+            analysis = tool.analyze_text_complexity(lang_file)
+            
+            if 'error' in analysis:
+                click.echo(f"Error: {analysis['error']}")
             else:
-                click.echo(f"   {idx}. {model}")
-        
-        model_choice = click.prompt("\nSelect a model number", type=int, default=1)
-        
-        if model_choice < 1 or model_choice > len(models):
-            click.echo("Invalid model selection.")
-            return
-        
-        selected_model = models[model_choice - 1]
-        
-        # Get target age from user
-        target_age = click.prompt("\nEnter target age for quiz language (e.g., 8, 10, 12, 14)", type=int, default=10)
-        
-        click.echo(f"\nUsing model: {selected_model}")
-        click.echo(f"Target age: {target_age} years old")
-        click.echo("\nThis will generate a 10-question multiple choice quiz based on the game narrative.")
-        click.echo("Each question is worth 1 mark.")
-        
-        if not click.confirm("\nProceed with quiz generation?", default=True):
-            click.echo("Cancelled.")
-            return
-        
-        click.echo("\n" + "="*60)
-        click.echo("GENERATING QUIZ")
-        click.echo("="*60)
-        
-        result = tool.generate_quiz(lang_file, selected_model, target_age)
-        
-        if 'error' in result:
-            click.echo(f"\nError: {result['error']}")
-        else:
-            click.echo("\nQuiz generated successfully!")
-            click.echo("="*60)
-            click.echo(f"Quiz file: {result['quiz_file']}")
-            click.echo(f"Answer key: {result['answer_key_file']}")
+                # Display results
+                click.echo("="*70)
+                click.echo("TEXT COMPLEXITY ANALYSIS REPORT")
+                click.echo("="*70)
+                
+                click.echo(f"\nBASIC STATISTICS")
+                click.echo(f"   Player-facing text entries analyzed: {analysis['total_entries']:,}")
+                click.echo(f"   Technical entries skipped: {analysis['skipped_technical']:,}")
+                click.echo(f"   Total words: {analysis['total_words']:,}")
+                click.echo(f"   Unique words: {analysis['unique_words']:,}")
+                click.echo(f"   Total sentences: {analysis['total_sentences']:,}")
+                click.echo(f"   Average word length: {analysis['avg_word_length']} characters")
+                click.echo(f"   Average sentence length: {analysis['avg_sentence_length']} words")
+                click.echo(f"   Average syllables per word: {analysis['avg_syllables_per_word']}")
+                
+                click.echo(f"\nREADABILITY METRICS")
+                click.echo(f"   Flesch Reading Ease: {analysis['flesch_reading_ease']}")
+                click.echo(f"      (0-100 scale, higher = easier)")
+                click.echo(f"   Flesch-Kincaid Grade: {analysis['flesch_kincaid_grade']}")
+                click.echo(f"   Gunning Fog Index: {analysis['gunning_fog_index']}")
+                if analysis['smog_index']:
+                    click.echo(f"   SMOG Index: {analysis['smog_index']}")
+                else:
+                    click.echo(f"   SMOG Index: N/A (requires 30+ sentences)")
+                click.echo(f"   Coleman-Liau Index: {analysis['coleman_liau_index']}")
+                click.echo(f"   Automated Readability Index: {analysis['automated_readability_index']}")
+                
+                click.echo(f"\nOVERALL ASSESSMENT")
+                click.echo(f"   Grade Level: {analysis['grade_level']}")
+                click.echo(f"   Target Age Range: {analysis['age_range']}")
+                click.echo(f"   Difficulty: {analysis['difficulty']}")
+                
+                click.echo(f"\nVOCABULARY COMPLEXITY")
+                vc = analysis['vocabulary_complexity']
+                click.echo(f"   Short words (1-3 chars): {vc['short_words_1_3']:,} ({vc['short_words_1_3']/analysis['total_words']*100:.1f}%)")
+                click.echo(f"   Medium words (4-6 chars): {vc['medium_words_4_6']:,} ({vc['medium_words_4_6']/analysis['total_words']*100:.1f}%)")
+                click.echo(f"   Long words (7+ chars): {vc['long_words_7_plus']:,} ({vc['long_words_7_plus']/analysis['total_words']*100:.1f}%)")
+                click.echo(f"   Complex words (3+ syllables): {vc['complex_words_3plus_syllables']:,} ({vc['complex_words_3plus_syllables']/analysis['total_words']*100:.1f}%)")
+                click.echo(f"   Lexical diversity: {vc['lexical_diversity']}")
+                click.echo(f"      (unique words / total words)")
+                
+                click.echo("\n" + "="*70)
+                
+                # Ask if user wants to save report
+                if click.confirm("\nSave detailed report to file?", default=False):
+                    report_path = Path(cache_dir) / f"{lang_file.stem}_complexity_report.txt"
+                    with open(report_path, 'w', encoding='utf-8') as f:
+                        f.write("TEXT COMPLEXITY ANALYSIS REPORT\n")
+                        f.write("="*70 + "\n")
+                        f.write(f"File: {lang_file.name}\n")
+                        f.write(f"Analysis Date: {Path(report_path).stat().st_mtime}\n\n")
+                        
+                        f.write("BASIC STATISTICS\n")
+                        f.write(f"  Player-facing text entries: {analysis['total_entries']:,}\n")
+                        f.write(f"  Total words: {analysis['total_words']:,}\n")
+                        f.write(f"  Unique words: {analysis['unique_words']:,}\n")
+                        f.write(f"  Total sentences: {analysis['total_sentences']:,}\n")
+                        f.write(f"  Average word length: {analysis['avg_word_length']} characters\n")
+                        f.write(f"  Average sentence length: {analysis['avg_sentence_length']} words\n")
+                        f.write(f"  Average syllables per word: {analysis['avg_syllables_per_word']}\n\n")
+                        
+                        f.write("READABILITY METRICS\n")
+                        f.write(f"  Flesch Reading Ease: {analysis['flesch_reading_ease']}\n")
+                        f.write(f"  Flesch-Kincaid Grade: {analysis['flesch_kincaid_grade']}\n")
+                        f.write(f"  Gunning Fog Index: {analysis['gunning_fog_index']}\n")
+                        f.write(f"  SMOG Index: {analysis['smog_index'] if analysis['smog_index'] else 'N/A'}\n")
+                        f.write(f"  Coleman-Liau Index: {analysis['coleman_liau_index']}\n")
+                        f.write(f"  Automated Readability Index: {analysis['automated_readability_index']}\n\n")
+                        
+                        f.write("OVERALL ASSESSMENT\n")
+                        f.write(f"  Grade Level: {analysis['grade_level']}\n")
+                        f.write(f"  Target Age Range: {analysis['age_range']}\n")
+                        f.write(f"  Difficulty: {analysis['difficulty']}\n\n")
+                        
+                        f.write("VOCABULARY COMPLEXITY\n")
+                        f.write(f"  Short words (1-3 chars): {vc['short_words_1_3']:,}\n")
+                        f.write(f"  Medium words (4-6 chars): {vc['medium_words_4_6']:,}\n")
+                        f.write(f"  Long words (7+ chars): {vc['long_words_7_plus']:,}\n")
+                        f.write(f"  Complex words (3+ syllables): {vc['complex_words_3plus_syllables']:,}\n")
+                        f.write(f"  Lexical diversity: {vc['lexical_diversity']}\n")
+                    
+                    click.echo(f"Report saved to: {report_path}")
+    
+        elif choice == 3:
+            # Create game context file
+            click.echo(f"\nCreate Game Context File using Ollama")
             click.echo("="*60)
             
-            # Show preview of quiz
-            if click.confirm("\nPreview quiz?", default=True):
-                with open(result['quiz_file'], 'r', encoding='utf-8') as f:
-                    quiz_content = f.read()
-                    click.echo("\n" + "="*60)
-                    click.echo(quiz_content)
-                    click.echo("="*60)
-    
-    elif choice == 6:
-        # View full contents
-        with open(lang_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-            click.echo_via_pager(content)
-    
-    elif choice == 7:
-        # File statistics
-        with open(lang_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            total_lines = len(lines)
-            entry_lines = sum(1 for line in lines if '=' in line and not line.strip().startswith('#'))
-            comment_lines = sum(1 for line in lines if line.strip().startswith('#') or line.strip().startswith('//'))
-            empty_lines = sum(1 for line in lines if not line.strip())
+            # Check for Ollama and get models
+            click.echo("Checking for available Ollama models...")
+            models = tool.get_ollama_models()
+            
+            if not models:
+                click.echo("\nNo Ollama models found!")
+                click.echo("   Please install Ollama and download a model first.")
+                click.echo("   Visit: https://ollama.ai")
+                click.echo("\n   Quick start:")
+                click.echo("      1. Install Ollama")
+                click.echo("      2. Run: ollama pull phi4")
+                click.echo("      3. Run this tool again")
+                return
+            
+            # Display available models
+            click.echo(f"\nFound {len(models)} model(s):")
+            for i, model in enumerate(models, 1):
+                click.echo(f"   {i}. {model}")
+            
+            if len(models) == 1:
+                model_choice = 1
+                click.echo(f"\nUsing model: {models[0]}")
+            else:
+                model_choice = click.prompt("\nSelect model number", type=int, default=1)
+                if model_choice < 1 or model_choice > len(models):
+                    click.echo("Invalid choice!")
+                    return
+            
+            selected_model = models[model_choice - 1]
+            
+            # Create context file
+            result = tool.create_context_file(lang_file, selected_model)
+            
+            if 'error' in result:
+                click.echo(f"\nError: {result['error']}")
+            elif result.get('status') == 'cancelled':
+                click.echo(f"\n{result['message']}")
+            else:
+                click.echo(f"\n{'='*60}")
+                click.echo("CONTEXT FILE SUMMARY")
+                click.echo(f"{'='*60}")
+                click.echo(f"\nQuestions asked: {len(result['questions'])}")
+                click.echo(f"Context file: {result['context_file']}")
+                click.echo(f"\nThis context will now be used to enhance:")
+                click.echo("   • AI content analysis")
+                click.echo("   • Quiz generation")
+                click.echo("   • Text improvements")
+                click.echo(f"\n{'='*60}")
         
-        click.echo(f"\nFile Statistics for {lang_file.name}:")
-        click.echo(f"  Total lines: {total_lines}")
-        click.echo(f"  Entry lines: {entry_lines}")
-        click.echo(f"  Comment lines: {comment_lines}")
-        click.echo(f"  Empty lines: {empty_lines}")
-        click.echo(f"  File size: {lang_file.stat().st_size:,} bytes")
+        elif choice == 4:
+            # AI content analysis with Ollama
+            click.echo(f"\nAI Content Analysis using Ollama")
+            click.echo("="*60)
+            
+            # Check for Ollama and get models
+            click.echo("Checking for available Ollama models...")
+            models = tool.get_ollama_models()
+            
+            if not models:
+                click.echo("\nNo Ollama models found!")
+                click.echo("   Please install Ollama and download a model first.")
+                click.echo("   Visit: https://ollama.ai")
+                click.echo("\n   Quick start:")
+                click.echo("   1. Install Ollama")
+                click.echo("   2. Run: ollama pull llama3.2")
+                return
+            
+            click.echo(f"\nFound {len(models)} model(s):")
+            for idx, model in enumerate(models, 1):
+                # Add speed indicator based on model size
+                if any(size in model for size in ['70b', '72b', '90b', '405b']):
+                    speed = "slow but thorough"
+                elif any(size in model for size in ['13b', '14b', '34b']):
+                    speed = "moderate speed"
+                elif any(size in model for size in ['7b', '8b', '3b', '1b']):
+                    speed = "fast"
+                else:
+                    speed = ""
+                
+                if speed:
+                    click.echo(f"   {idx}. {model} ({speed})")
+                else:
+                    click.echo(f"   {idx}. {model}")
+            
+            # Let user select model
+            model_choice = click.prompt(
+                "\nSelect a model number",
+                type=int,
+                default=1
+            )
+            
+            if model_choice < 1 or model_choice > len(models):
+                click.echo("Invalid model selection.")
+                return
+            
+            selected_model = models[model_choice - 1]
+            
+            # Show model size/speed hint
+            if any(size in selected_model for size in ['70b', '72b', '90b', '405b']):
+                speed_hint = "Large model detected - may take 2-5 minutes"
+            elif any(size in selected_model for size in ['13b', '14b', '34b']):
+                speed_hint = "Medium model - typically 1-2 minutes"
+            else:
+                speed_hint = "Small model - typically 30-90 seconds"
+            
+            click.echo(f"\nUsing model: {selected_model}")
+            click.echo(f"{speed_hint}")
+            click.echo("\n" + "="*60)
+            click.echo("AI ANALYSIS IN PROGRESS")
+            click.echo("="*60)
+            click.echo("Step 1/2: Extracting player-facing text samples...")
+            click.echo("Step 2/2: Analyzing with AI...")
+            click.echo("           (Maximum wait time: 5 minutes)")
+            
+            # Run analysis (will show spinner during processing)
+            result = tool.analyze_with_ollama(lang_file, selected_model)
+            
+            click.echo("\nAnalysis complete!\n")
+            
+            if 'error' in result:
+                click.echo(f"\nError: {result['error']}")
+                if 'samples_analyzed' in result:
+                    click.echo(f"   Text samples found: {result['samples_analyzed']}")
+            else:
+                click.echo("="*60)
+                click.echo("AI GAME CONTENT ANALYSIS")
+                click.echo("="*60)
+                click.echo(f"\nModel: {result['model']}")
+                click.echo(f"Text samples analyzed: {result['samples_analyzed']}")
+                click.echo("\n" + "-"*60)
+                click.echo(result['analysis'])
+                click.echo("-"*60)
+                
+                # Ask if user wants to save
+                if click.confirm("\nSave analysis to file?", default=False):
+                    analysis_path = Path(cache_dir) / f"{lang_file.stem}_ai_analysis.txt"
+                    with open(analysis_path, 'w', encoding='utf-8') as f:
+                        f.write("AI GAME CONTENT ANALYSIS\n")
+                        f.write("="*60 + "\n")
+                        f.write(f"File: {lang_file.name}\n")
+                        f.write(f"Model: {result['model']}\n")
+                        f.write(f"Text samples analyzed: {result['samples_analyzed']}\n")
+                        f.write("\n" + "-"*60 + "\n")
+                        f.write(result['analysis'])
+                        f.write("\n" + "-"*60 + "\n")
+                    
+                    click.echo(f"Analysis saved to: {analysis_path}")
+        
+        elif choice == 5:
+            # AI text improvement for target age
+            click.echo(f"\nAI Text Improvement for Target Age")
+            click.echo("="*60)
+            
+            # Check for Ollama and get models
+            click.echo("Checking for available Ollama models...")
+            models = tool.get_ollama_models()
+            
+            if not models:
+                click.echo("\nNo Ollama models found!")
+                click.echo("   Please install Ollama and download a model first.")
+                click.echo("   Visit: https://ollama.ai")
+                return
+            
+            click.echo(f"\nFound {len(models)} model(s):")
+            for idx, model in enumerate(models, 1):
+                if any(size in model for size in ['70b', '72b', '90b', '405b']):
+                    speed = "slow but thorough"
+                elif any(size in model for size in ['13b', '14b', '34b']):
+                    speed = "moderate speed"
+                elif any(size in model for size in ['7b', '8b', '3b', '1b']):
+                    speed = "fast"
+                else:
+                    speed = ""
+                
+                if speed:
+                    click.echo(f"   {idx}. {model} ({speed})")
+                else:
+                    click.echo(f"   {idx}. {model}")
+            
+            model_choice = click.prompt("\nSelect a model number", type=int, default=1)
+            
+            if model_choice < 1 or model_choice > len(models):
+                click.echo("Invalid model selection.")
+                return
+            
+            selected_model = models[model_choice - 1]
+            
+            # Get target age from user
+            target_age = click.prompt("\nEnter target age for text improvement (e.g., 8, 10, 12, 14)", type=int, default=10)
+            
+            click.echo(f"\nUsing model: {selected_model}")
+            click.echo(f"Target age: {target_age} years old")
+            click.echo("\nThis will:")
+            click.echo("  1. Analyze each line to determine if it's player-facing")
+            click.echo(f"  2. Improve text readability for age {target_age}")
+            click.echo("  3. Preserve all technical formatting and keys")
+            click.echo("  4. Generate a new lang file and changelog")
+            click.echo("\nNote: This may take several minutes for large files.")
+            click.echo("      You can monitor progress by opening the changelog file during processing.")
+            
+            if not click.confirm("\nProceed with AI text improvement?", default=True):
+                click.echo("Cancelled.")
+                return
+            
+            # Show changelog path before starting
+            lang_path_obj = Path(lang_file)
+            changelog_filename = lang_path_obj.stem + f"_changelog_age{target_age}.txt"
+            changelog_dir = lang_path_obj.parent / "improvements"
+            changelog_preview_path = changelog_dir / changelog_filename
+            
+            click.echo("\n" + "="*60)
+            click.echo("AI TEXT IMPROVEMENT IN PROGRESS")
+            click.echo("="*60)
+            click.echo(f"\nChangelog: file://{changelog_preview_path.absolute()}")
+            click.echo("(Click the link above to open and monitor progress)\n")
+            
+            result = tool.improve_text_for_age(lang_file, selected_model, target_age)
+            
+            if 'error' in result:
+                click.echo(f"\nError: {result['error']}")
+            else:
+                click.echo("\nImprovement complete!")
+                click.echo("="*60)
+                click.echo(f"Lines processed: {result['lines_processed']}")
+                click.echo(f"Lines improved: {result['lines_improved']}")
+                click.echo(f"Lines unchanged: {result['lines_unchanged']}")
+                click.echo(f"\nNew file: {result['output_file']}")
+                click.echo(f"Changelog: {result['changelog_file']}")
+                click.echo("="*60)
+                
+                # Show sample changes
+                if result['lines_improved'] > 0 and click.confirm("\nPreview sample changes?", default=True):
+                    changelog_path = Path(result['changelog_file'])
+                    with open(changelog_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        preview_lines = min(20, len(lines))
+                        click.echo(f"\nFirst {preview_lines} lines of changelog:")
+                        click.echo("-" * 60)
+                        for line in lines[:preview_lines]:
+                            click.echo(line.rstrip())
+                        if len(lines) > preview_lines:
+                            click.echo(f"... ({len(lines) - preview_lines} more changes)")
+                        click.echo("-" * 60)
+        
+        elif choice == 6:
+            # Generate quiz from game narrative
+            click.echo(f"\nGenerate Quiz from Game Narrative")
+            click.echo("="*60)
+            
+            # Check for Ollama and get models
+            click.echo("Checking for available Ollama models...")
+            models = tool.get_ollama_models()
+            
+            if not models:
+                click.echo("\nNo Ollama models found!")
+                click.echo("   Please install Ollama and download a model first.")
+                click.echo("   Visit: https://ollama.ai")
+                return
+            
+            click.echo(f"\nFound {len(models)} model(s):")
+            for idx, model in enumerate(models, 1):
+                if any(size in model for size in ['70b', '72b', '90b', '405b']):
+                    speed = "slow but thorough"
+                elif any(size in model for size in ['13b', '14b', '34b']):
+                    speed = "moderate speed"
+                elif any(size in model for size in ['7b', '8b', '3b', '1b']):
+                    speed = "fast"
+                else:
+                    speed = ""
+                
+                if speed:
+                    click.echo(f"   {idx}. {model} ({speed})")
+                else:
+                    click.echo(f"   {idx}. {model}")
+            
+            model_choice = click.prompt("\nSelect a model number", type=int, default=1)
+            
+            if model_choice < 1 or model_choice > len(models):
+                click.echo("Invalid model selection.")
+                return
+            
+            selected_model = models[model_choice - 1]
+            
+            # Get target age from user
+            target_age = click.prompt("\nEnter target age for quiz language (e.g., 8, 10, 12, 14)", type=int, default=10)
+            
+            click.echo(f"\nUsing model: {selected_model}")
+            click.echo(f"Target age: {target_age} years old")
+            click.echo("\nThis will generate a 10-question multiple choice quiz based on the game narrative.")
+            click.echo("Each question is worth 1 mark.")
+            
+            if not click.confirm("\nProceed with quiz generation?", default=True):
+                click.echo("Cancelled.")
+                return
+            
+            click.echo("\n" + "="*60)
+            click.echo("GENERATING QUIZ")
+            click.echo("="*60)
+            
+            result = tool.generate_quiz(lang_file, selected_model, target_age)
+            
+            if 'error' in result:
+                click.echo(f"\nError: {result['error']}")
+            else:
+                click.echo("\nQuiz generated successfully!")
+                click.echo("="*60)
+                click.echo(f"Quiz file: {result['quiz_file']}")
+                click.echo(f"Answer key: {result['answer_key_file']}")
+                click.echo("="*60)
+                
+                # Show preview of quiz
+                if click.confirm("\nPreview quiz?", default=True):
+                    with open(result['quiz_file'], 'r', encoding='utf-8') as f:
+                        quiz_content = f.read()
+                        click.echo("\n" + "="*60)
+                        click.echo(quiz_content)
+                        click.echo("="*60)
+        
+        elif choice == 7:
+            # View full contents
+            with open(lang_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                click.echo_via_pager(content)
+        
+        elif choice == 8:
+            # File statistics
+            with open(lang_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                total_lines = len(lines)
+                entry_lines = sum(1 for line in lines if '=' in line and not line.strip().startswith('#'))
+                comment_lines = sum(1 for line in lines if line.strip().startswith('#') or line.strip().startswith('//'))
+                empty_lines = sum(1 for line in lines if not line.strip())
+            
+            click.echo(f"\nFile Statistics for {lang_file.name}:")
+            click.echo(f"  Total lines: {total_lines}")
+            click.echo(f"  Entry lines: {entry_lines}")
+            click.echo(f"  Comment lines: {comment_lines}")
+            click.echo(f"  Empty lines: {empty_lines}")
+            click.echo(f"  File size: {lang_file.stat().st_size:,} bytes")
+        
+        elif choice == 9:
+            # Settings menu
+            show_settings_menu(tool)
     
     click.echo("\nDone!")
 

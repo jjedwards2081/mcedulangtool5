@@ -27,9 +27,20 @@ pip install -r requirements.txt
 ```
 
 3. (Optional) Install Ollama for AI features:
-   - Download from https://ollama.ai
-   - Pull the recommended model: `ollama pull phi4` (best for educational content)
-   - Alternative models: `ollama pull llama3.2` or `ollama pull gemma3:1b`
+   - **Easy way**: Use the built-in Settings menu (Option 9) for guided installation
+   - **Manual way**: 
+     - Download from https://ollama.ai
+     - Pull the recommended model: `ollama pull phi4` (best for educational content)
+     - Alternative models: `ollama pull llama3.2` or `ollama pull gemma3:1b`
+
+## Quick Start
+
+1. Run the tool: `python minecraft_lang_tool.py process your_world.mcworld`
+2. If you need AI features, select **Option 9 (Settings)** to:
+   - Check if Ollama is installed
+   - Get installation instructions
+   - Install the recommended phi4 model
+3. Return to main menu and use AI features (Options 3-6)
 
 ## Usage
 
@@ -91,17 +102,40 @@ Provides:
 
 **Note**: Optimized for English (en_US) text. Non-English files will show a warning.
 
-### 3. AI Content Analysis
+### 3. Create Game Context File
+Build a knowledge base about your game through AI-guided questions:
+- AI generates 5 relevant questions about your game
+- Captures your answers interactively
+- Creates consolidated context summary
+- **Enhances all AI operations**: content analysis, quiz generation, text improvements
+- Stored as `<filename>_context.txt` for reuse
+
+**How it works**:
+1. AI analyzes game text samples
+2. Generates 5 targeted questions about:
+   - Educational topic/subject matter
+   - Learning objectives
+   - Target age/grade level
+   - Key concepts taught
+   - Narrative context
+3. You provide answers
+4. AI consolidates into context file
+5. Context automatically used in subsequent AI operations
+
+**Requires**: Ollama installed with at least one model (phi4 recommended)
+
+### 4. AI Content Analysis
 Analyze game content using local Ollama models:
 - Automatically detects available models
 - Summarizes game theme and features
 - Identifies educational focus
 - Determines target audience
 - Saves analysis report
+- **Enhanced with context file** if available
 
 **Requires**: Ollama installed with at least one model
 
-### 4. AI Text Improvement for Target Age
+### 5. AI Text Improvement for Target Age
 Improve text line-by-line to match a specific reading level:
 - Choose target age (e.g., 8, 10, 12)
 - AI suggests improvements for each line
@@ -121,8 +155,9 @@ Improve text line-by-line to match a specific reading level:
 - No technical references in improvements
 - Real-time progress with elapsed time
 - Organized output in `improvements/` folder
+- **Enhanced with context file** if available
 
-### 5. Generate Quiz from Game Narrative
+### 6. Generate Quiz from Game Narrative
 Create educational quizzes from game content:
 - 10 multiple choice questions
 - Age-appropriate language
@@ -135,12 +170,31 @@ Create educational quizzes from game content:
 - Quiz file: `<filename>_quiz_age<X>.txt`
 - Answer key: `<filename>_quiz_age<X>_answers.txt`
 - Saved in `quizzes/` folder
+- **Enhanced with context file** if available
 
-### 6. View Full File Contents
+### 7. View Full File Contents
 Display the entire lang file with pagination
 
-### 7. Get File Statistics
+### 8. Get File Statistics
 Line counts, file size, and content type breakdown
+
+### 9. Settings
+Manage Ollama installation and configuration:
+- **Check Ollama installation**: Verify if Ollama is installed and get version info
+- **Install Ollama**: Get platform-specific installation instructions
+  - macOS: Download or Homebrew instructions
+  - Linux: curl installation script
+  - Windows: Installer download
+  - Opens Ollama website in browser
+- **Install models**: Interactive model installation (phi4 recommended)
+- **List installed models**: View all available models on your system
+
+**Features**:
+- Automatic Ollama detection
+- Platform-specific instructions (macOS, Linux, Windows)
+- Direct model installation from the tool
+- Model recommendations for educational content
+- Real-time installation progress
 
 ## File Structure
 
@@ -155,6 +209,7 @@ mcedulangtool5/
             └── <Pack_Name>/
                 └── texts/
                     ├── en_US.lang
+                    ├── en_US_context.txt          # Game context file
                     ├── en_US_improved_age10.lang
                     ├── improvements/
                     │   └── en_US_changelog_age10.txt
@@ -249,32 +304,51 @@ Automatically removes for analysis:
 
 ## Example Workflow
 
+### Recommended: Start with Context File
+For best AI results, create a context file first:
+
 1. **Extract and select file**:
    ```bash
    python minecraft_lang_tool.py process Sustainability_City.mcworld
    ```
 
-2. **Analyze text complexity** (Option 2):
+2. **Create game context** (Option 3):
+   - AI generates 5 questions about your game
+   - Answer questions interactively
+   - Context saved and used for all future AI operations
+   - **Do this first for best results!**
+
+3. **Analyze text complexity** (Option 2):
    - Check reading level
    - Identify if improvements needed
 
-3. **Improve text for target age** (Option 4):
+4. **Improve text for target age** (Option 5):
    - Set target age (e.g., 10)
+   - Context automatically enhances improvements
    - Review each suggestion
    - Accept, edit, or reject changes
    - Get improved file + changelog
 
-4. **Generate quiz** (Option 5):
+5. **Generate quiz** (Option 6):
    - Choose target age
+   - Context automatically enhances question quality
    - Get 10 questions based on game content
    - Use for classroom assessment
+
+### Alternative: Without Context File
+You can skip the context file creation (Option 3) and use AI features directly, but results will be less tailored to your specific game content.
 
 ## Troubleshooting
 
 ### No Ollama models found
-- Install Ollama from https://ollama.ai
-- Pull a model: `ollama pull phi4`
-- Verify: `ollama list`
+- **Easiest solution**: Use Settings menu (Option 9)
+  - Check if Ollama is installed
+  - Get installation instructions for your platform
+  - Install models directly from the tool
+- **Manual solution**: 
+  - Install Ollama from https://ollama.ai
+  - Pull a model: `ollama pull phi4`
+  - Verify: `ollama list`
 
 ### Timeout errors during AI processing
 - Use a smaller/faster model
