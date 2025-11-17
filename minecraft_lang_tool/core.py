@@ -40,7 +40,7 @@ class MinecraftLangTool:
     def __init__(self, cache_dir: str = ".mc_lang_cache"):
         """Initialize the Minecraft Language Tool with a cache directory."""
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
     
     @staticmethod
     def sanitize_filename(filename: str) -> str:
@@ -991,7 +991,7 @@ Provide a clear, concise analysis:"""
         # Set cache directory
         if 'cache_dir' in config:
             self.cache_dir = Path(config['cache_dir'])
-            self.cache_dir.mkdir(exist_ok=True)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         input_path = Path(input_file)
         
