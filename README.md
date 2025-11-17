@@ -28,7 +28,8 @@ pip install -r requirements.txt
 
 3. (Optional) Install Ollama for AI features:
    - Download from https://ollama.ai
-   - Pull a model: `ollama pull phi4` or `ollama pull llama3.2`
+   - Pull the recommended model: `ollama pull phi4` (best for educational content)
+   - Alternative models: `ollama pull llama3.2` or `ollama pull gemma3:1b`
 
 ## Usage
 
@@ -168,7 +169,8 @@ mcedulangtool5/
 - click >= 8.1.0 (CLI framework)
 - Ollama (optional, for AI features)
   - Install from: https://ollama.ai
-  - Recommended models: `phi4`, `llama3.2`, `gpt-oss:20b`, `gemma3:1b`
+  - **Recommended: `phi4`** (optimized for educational content, excellent results)
+  - Alternative models: `llama3.2`, `gpt-oss:20b`, `gemma3:1b`
 
 ## How It Works
 
@@ -224,12 +226,15 @@ Automatically removes for analysis:
 - Supports custom world key formats
 
 ### For AI Features
-- **Smaller models** (7B-13B): Faster, good for most tasks
-  - `phi4` - Excellent for educational content
-  - `llama3.2` - Fast and capable
+- **Recommended: `phi4`** - Best choice for educational content
+  - Optimized for instruction-following and educational text
+  - Excellent balance of speed and quality
+  - Produces age-appropriate, contextually relevant improvements
+- **Alternative smaller models** (7B-13B): Good for most tasks
+  - `llama3.2` - Fast and capable general-purpose model
   - `gemma3:1b` - Very fast, lighter analysis
 - **Larger models** (20B+): Better analysis but slower
-  - `gpt-oss:20b` - High quality improvements
+  - `gpt-oss:20b` - High quality improvements, more computational resources
   
 ### For Text Improvement
 - Choose appropriate target age for your audience
@@ -297,8 +302,30 @@ Potential additions:
 
 ## License
 
-This tool is provided as-is for educational purposes.
+MIT License
 
-## Credits
+Copyright (c) 2025 Justin Edwards
 
-Created for processing Minecraft Education Edition worlds and enhancing educational content accessibility.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## Author
+
+**Justin Edwards**
+- Email: jnredwards@gmail.com
+- Created for processing Minecraft Education Edition worlds and enhancing educational content accessibility

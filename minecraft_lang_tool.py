@@ -1,7 +1,34 @@
 #!/usr/bin/env python3
 """
 Minecraft Language File Tool
+
 A CLI tool for extracting and processing Minecraft .lang files from .mcworld/.mctemplate archives
+with AI-powered educational features including text complexity analysis, content improvement,
+and quiz generation.
+
+Author: Justin Edwards
+Email: jnredwards@gmail.com
+License: MIT License
+
+Copyright (c) 2025 Justin Edwards
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 """
 
 import os
@@ -21,6 +48,18 @@ import threading
 
 
 class MinecraftLangTool:
+    """
+    Main class for processing Minecraft Education Edition language files.
+    
+    This tool provides functionality to:
+    - Extract .mcworld and .mctemplate archives
+    - Locate and parse .lang files
+    - Analyze text complexity and readability
+    - Improve text for specific target ages using AI
+    - Generate educational quizzes from game content
+    - Analyze content themes using Ollama AI models
+    """
+    
     def __init__(self, cache_dir: str = ".mc_lang_cache"):
         """Initialize the Minecraft Language Tool with a cache directory."""
         self.cache_dir = Path(cache_dir)
@@ -28,7 +67,18 @@ class MinecraftLangTool:
     
     @staticmethod
     def sanitize_filename(filename: str) -> str:
-        """Remove spaces and special characters from filename for terminal compatibility."""
+        """
+        Remove spaces and special characters from filename for terminal compatibility.
+        
+        Converts filenames like "Sustainability City v3" to "Sustainability_City_v3"
+        making them easy to click and use in terminal environments.
+        
+        Args:
+            filename: Original filename string
+            
+        Returns:
+            Sanitized filename with only alphanumeric, underscores, hyphens, and dots
+        """
         # Keep only alphanumeric, underscores, hyphens, and dots
         sanitized = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
         # Remove consecutive underscores
@@ -38,7 +88,23 @@ class MinecraftLangTool:
         return sanitized
         
     def extract_archive(self, archive_path: str) -> Path:
-        """Extract .mcworld or .mctemplate file to cache directory."""
+        """
+        Extract .mcworld or .mctemplate file to cache directory.
+        
+        Both .mcworld and .mctemplate files are ZIP archives containing
+        Minecraft Education Edition world data. This method extracts them
+        to a cache directory for processing.
+        
+        Args:
+            archive_path: Path to the .mcworld or .mctemplate file
+            
+        Returns:
+            Path to the extracted directory
+            
+        Raises:
+            FileNotFoundError: If the archive doesn't exist
+            zipfile.BadZipFile: If the archive is corrupted
+        """
         archive_path = Path(archive_path)
         
         if not archive_path.exists():
@@ -64,7 +130,22 @@ class MinecraftLangTool:
             raise ValueError(f"Invalid archive format: {archive_path}")
     
     def find_lang_files(self, directory: Path) -> List[Tuple[Path, int]]:
-        """Find all .lang files in directory and return with their sizes (largest first)."""
+        """
+        Find all .lang files in directory and return with their sizes (largest first).
+        
+        Prioritizes English language files, particularly en_US, as these are most
+        commonly used in Minecraft Education Edition. Files are sorted by size
+        to help identify the primary language file.
+        
+        Args:
+            directory: Root directory to search recursively
+            
+        Returns:
+            List of tuples containing (file_path, file_size_bytes) sorted by:
+            1. en_US files (largest first)
+            2. Other English variants (en_GB, en_CA, etc.)
+            3. All other language files (largest first)
+        """
         lang_files = []
         en_us_files = []
         other_english_files = []
@@ -321,7 +402,32 @@ class MinecraftLangTool:
     def analyze_text_complexity(self, lang_path: Path) -> Dict:
         """
         Perform comprehensive text complexity analysis on player-facing text.
-        Returns reading level, age recommendations, and detailed statistics.
+        
+        Uses multiple established readability formulas to assess the reading level
+        of game text. Particularly useful for educators to determine if content
+        is appropriate for their students' reading abilities.
+        
+        Metrics calculated:
+        - Flesch Reading Ease (0-100 scale)
+        - Flesch-Kincaid Grade Level
+        - Gunning Fog Index
+        - SMOG Index
+        - Coleman-Liau Index
+        - Automated Readability Index (ARI)
+        
+        Also provides vocabulary analysis and age recommendations.
+        
+        Args:
+            lang_path: Path to the lang file to analyze
+            
+        Returns:
+            dict: Comprehensive analysis including:
+                - All readability scores
+                - Grade level recommendations
+                - Age range estimates
+                - Vocabulary breakdown
+                - Lexical diversity metrics
+                - Warning if non-English text detected
         """
         # Extract player-facing text values only
         text_values = []
@@ -609,10 +715,23 @@ class MinecraftLangTool:
         words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
         return words
     
+    # ========================================================================
+    # Helper Methods for Text Analysis
+    # ========================================================================
+    
     def _count_syllables(self, word: str) -> int:
         """
         Estimate syllable count for a word.
-        Uses a simple heuristic based on vowel groups.
+        
+        Uses a simple heuristic based on vowel groups, which is sufficiently
+        accurate for readability analysis. Handles common patterns like
+        silent 'e' and consonant-le endings.
+        
+        Args:
+            word: Single word to analyze
+            
+        Returns:
+            Estimated syllable count (minimum 1)
         """
         word = word.lower()
         vowels = 'aeiouy'
@@ -773,15 +892,32 @@ class MinecraftLangTool:
     
     def improve_text_for_age(self, lang_path, model_name, target_age):
         """
-        Use Ollama to improve text in lang file for specific target age.
+        Use Ollama AI to improve text in lang file for specific target age.
+        
+        This method processes each line of the language file and uses AI to suggest
+        improvements that make the text more appropriate for the target age group.
+        Users have full control to accept, edit, or reject each suggestion.
+        
+        Features:
+        - Context-aware: Skips short labels (1-2 words)
+        - Smart processing: Vocabulary-only for short text, full improvements for longer text
+        - User control: Accept AI suggestion, provide custom edit, or reject
+        - Real-time logging: Creates detailed changelog with line numbers and status
+        - Progress tracking: Shows spinner with elapsed time
         
         Args:
-            lang_path: Path to the lang file
-            model_name: Name of the Ollama model to use
-            target_age: Target age for text improvement
+            lang_path: Path to the lang file to improve
+            model_name: Name of the Ollama model to use (e.g., 'phi4', 'llama3.2')
+            target_age: Target age for text improvements (e.g., 8, 10, 12)
             
         Returns:
-            dict: Results including output file paths and statistics
+            dict: Results including:
+                - output_file: Path to improved lang file
+                - changelog_file: Path to detailed changelog
+                - lines_processed: Total lines processed
+                - lines_improved: Number of lines changed
+                - lines_unchanged: Number of lines kept original
+                - error: Error message if processing failed
         """
         try:
             with open(lang_path, 'r', encoding='utf-8') as f:
@@ -1128,13 +1264,27 @@ Response (either "KEEP_ORIGINAL" or the improved text only):"""
         """
         Generate a 10-question multiple choice quiz based on game narrative.
         
+        Uses AI to analyze the game's language file and create educational quiz
+        questions based on the storyline, gameplay mechanics, and educational content.
+        Questions are age-appropriate with 4 multiple choice options each.
+        
+        Features:
+        - Filters out technical game code and references
+        - Focuses on actual narrative and educational content
+        - Age-appropriate language and concepts
+        - Separate answer key file for educators
+        - Organized output in quizzes/ folder
+        
         Args:
             lang_path: Path to the lang file
-            model_name: Name of the Ollama model to use
-            target_age: Target age for quiz language
+            model_name: Name of the Ollama model to use (recommended: 'phi4')
+            target_age: Target age for quiz language (e.g., 8, 10, 12)
             
         Returns:
-            dict: Results including quiz file paths
+            dict: Results including:
+                - quiz_file: Path to the quiz file
+                - answer_key_file: Path to the answer key
+                - error: Error message if generation failed
         """
         # Extract narrative text from the lang file
         narrative_texts = []
@@ -1544,6 +1694,10 @@ def browse_downloads_folder() -> Optional[str]:
     return None
 
 
+# ============================================================================
+# CLI Commands
+# ============================================================================
+
 @click.group()
 def cli():
     """Minecraft Language File Tool - Extract and process .lang files from Minecraft archives."""
@@ -1555,7 +1709,13 @@ def cli():
 @click.option('--cache-dir', default='.mc_lang_cache', help='Directory for caching extracted files')
 @click.option('--downloads', is_flag=True, help='Browse files in Downloads folder')
 def process(input_file, cache_dir, downloads):
-    """Process a Minecraft .mcworld, .mctemplate, or .lang file."""
+    """
+    Process a Minecraft .mcworld, .mctemplate, or .lang file.
+    
+    Main command that provides access to all tool features through an
+    interactive menu system. Supports direct lang file processing or
+    extraction from Minecraft archives.
+    """
     tool = MinecraftLangTool(cache_dir=cache_dir)
     
     # If downloads flag is set or no input file provided, browse Downloads
@@ -2064,3 +2224,9 @@ def clear_cache(cache_dir):
 
 if __name__ == '__main__':
     cli()
+
+# ============================================================================
+# End of Minecraft Language File Tool
+# Created by Justin Edwards (jnredwards@gmail.com)
+# Released under MIT License
+# ============================================================================
