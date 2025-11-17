@@ -293,24 +293,55 @@ class MinecraftLangTool:
         try:
             with open(lang_path, 'r', encoding='utf-8') as f:
                 for line in f:
-                    line = line.strip()
-                    if '=' in line and not line.startswith('#'):
-                        key, value = line.split('=', 1)
-                        if any(key.strip().startswith(prefix) for prefix in player_facing_prefixes):
+                    stripped = line.strip()
+                    if '=' in stripped and not stripped.startswith('#'):
+                        parts = stripped.split('=', 1)
+                        if len(parts) != 2:
+                            continue
+                        
+                        key, value = parts
+                        key = key.strip()
+                        value = value.strip()
+                        
+                        # Skip empty values or values that are just technical strings
+                        if not value or len(value) < 3:
+                            continue
+                        
+                        # Skip if value looks like a key itself (no spaces, lots of dots/underscores)
+                        if '.' in value and ' ' not in value:
+                            skipped_technical += 1
+                            continue
+                        
+                        if any(key.startswith(prefix) for prefix in player_facing_prefixes):
+                            # Clean the text value
                             cleaned = self._clean_text_for_analysis(value)
-                            if cleaned:
+                            if cleaned and len(cleaned.split()) >= 2:
                                 text_values.append(cleaned)
                             else:
                                 skipped_technical += 1
         except UnicodeDecodeError:
             with open(lang_path, 'r', encoding='latin-1') as f:
                 for line in f:
-                    line = line.strip()
-                    if '=' in line and not line.startswith('#'):
-                        key, value = line.split('=', 1)
-                        if any(key.strip().startswith(prefix) for prefix in player_facing_prefixes):
+                    stripped = line.strip()
+                    if '=' in stripped and not stripped.startswith('#'):
+                        parts = stripped.split('=', 1)
+                        if len(parts) != 2:
+                            continue
+                        
+                        key, value = parts
+                        key = key.strip()
+                        value = value.strip()
+                        
+                        if not value or len(value) < 3:
+                            continue
+                        
+                        if '.' in value and ' ' not in value:
+                            skipped_technical += 1
+                            continue
+                        
+                        if any(key.startswith(prefix) for prefix in player_facing_prefixes):
                             cleaned = self._clean_text_for_analysis(value)
-                            if cleaned:
+                            if cleaned and len(cleaned.split()) >= 2:
                                 text_values.append(cleaned)
                             else:
                                 skipped_technical += 1

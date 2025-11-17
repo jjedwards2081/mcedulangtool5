@@ -16,6 +16,7 @@ import sys
 import json
 import click
 from pathlib import Path
+from typing import Optional
 
 # Add parent directory to path for package imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -23,7 +24,224 @@ sys.path.insert(0, str(Path(__file__).parent))
 from minecraft_lang_tool.core import MinecraftLangTool
 
 
-def browse_downloads_folder() -> str:
+def check_ollama_installed() -> bool:
+    """Check if Ollama is installed on the system."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['which', 'ollama'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def get_ollama_installation_instructions() -> str:
+    """Get platform-specific Ollama installation instructions."""
+    import platform
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        return """
+Ollama Installation for macOS:
+
+Option 1: Download from website (Recommended)
+   1. Visit https://ollama.ai
+   2. Click "Download for Mac"
+   3. Open the downloaded .dmg file
+   4. Drag Ollama to Applications
+   5. Open Ollama from Applications
+
+Option 2: Install via Homebrew
+   Run: brew install ollama
+
+After installation:
+   1. Verify: ollama --version
+   2. Start Ollama: ollama serve
+   3. Install a model: ollama pull phi4
+   4. Return to this tool and try AI features!
+"""
+    elif system == "Linux":
+        return """
+Ollama Installation for Linux:
+
+Run this command in terminal:
+   curl -fsSL https://ollama.ai/install.sh | sh
+
+After installation:
+   1. Verify: ollama --version
+   2. Start Ollama: ollama serve
+   3. Install a model: ollama pull phi4
+   4. Return to this tool and try AI features!
+
+For more details, visit: https://ollama.ai
+"""
+    elif system == "Windows":
+        return """
+Ollama Installation for Windows:
+
+   1. Visit https://ollama.ai
+   2. Click "Download for Windows"
+   3. Run the installer
+   4. Follow installation prompts
+
+After installation:
+   1. Open PowerShell or Command Prompt
+   2. Verify: ollama --version
+   3. Install a model: ollama pull phi4
+   4. Return to this tool and try AI features!
+"""
+    else:
+        return """
+Ollama Installation:
+
+   1. Visit https://ollama.ai
+   2. Download the installer for your platform
+   3. Follow the installation instructions
+
+After installation:
+   1. Verify: ollama --version
+   2. Install a model: ollama pull phi4
+   3. Return to this tool and try AI features!
+"""
+
+
+def show_settings_menu(tool):
+    """Display and handle settings menu."""
+    import subprocess
+    while True:
+        click.echo("\n" + "="*50)
+        click.echo("SETTINGS")
+        click.echo("="*50)
+        
+        # Check Ollama status
+        ollama_installed = check_ollama_installed()
+        ollama_status = "Installed" if ollama_installed else "Not installed"
+        
+        click.echo(f"\nOllama Status: {ollama_status}")
+        
+        if ollama_installed:
+            # Get available models
+            models = tool.get_ollama_models()
+            if models:
+                click.echo(f"Available models: {len(models)}")
+                click.echo("   " + ", ".join(models[:5]))
+                if len(models) > 5:
+                    click.echo(f"   ... and {len(models) - 5} more")
+            else:
+                click.echo("No models installed yet")
+        
+        click.echo("\n" + "-"*50)
+        click.echo("1. Check Ollama installation")
+        click.echo("2. Install Ollama (instructions)")
+        click.echo("3. Install Ollama model")
+        click.echo("4. List installed models")
+        click.echo("0. Back to main menu")
+        
+        choice = click.prompt("\nSelect an option", type=int, default=0)
+        
+        if choice == 0:
+            break
+        elif choice == 1:
+            # Check Ollama installation
+            click.echo("\nChecking Ollama installation...")
+            if check_ollama_installed():
+                click.echo("[OK] Ollama is installed")
+                
+                # Try to get version
+                try:
+                    result = subprocess.run(
+                        ['ollama', '--version'],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode == 0:
+                        click.echo(f"Version: {result.stdout.strip()}")
+                except Exception:
+                    pass
+                
+                # Check for models
+                models = tool.get_ollama_models()
+                if models:
+                    click.echo(f"\n[OK] {len(models)} model(s) installed")
+                else:
+                    click.echo("\n[WARNING] No models installed")
+                    click.echo("Run 'ollama pull phi4' to install recommended model")
+            else:
+                click.echo("[NOT FOUND] Ollama is not installed")
+                click.echo("\nChoose option 2 for installation instructions")
+        
+        elif choice == 2:
+            # Show installation instructions
+            instructions = get_ollama_installation_instructions()
+            click.echo(instructions)
+            
+            if click.confirm("\nOpen Ollama website in browser?", default=False):
+                import webbrowser
+                webbrowser.open("https://ollama.ai")
+                click.echo("Opened https://ollama.ai in your browser")
+        
+        elif choice == 3:
+            # Install model
+            if not check_ollama_installed():
+                click.echo("\n[ERROR] Ollama is not installed")
+                click.echo("Please install Ollama first (option 2)")
+                continue
+            
+            click.echo("\nRecommended models:")
+            click.echo("   phi4        - Best for educational content (recommended)")
+            click.echo("   llama3.2    - Fast and capable")
+            click.echo("   gemma2:2b   - Lightweight and fast")
+            click.echo("   mistral     - Good general purpose")
+            
+            model_name = click.prompt("\nEnter model name to install", type=str, default="phi4")
+            
+            click.echo(f"\nInstalling {model_name}...")
+            click.echo("This may take several minutes depending on model size...")
+            
+            try:
+                result = subprocess.run(
+                    ['ollama', 'pull', model_name],
+                    capture_output=False,
+                    text=True,
+                    timeout=600  # 10 minute timeout
+                )
+                
+                if result.returncode == 0:
+                    click.echo(f"\n[OK] Successfully installed {model_name}")
+                else:
+                    click.echo(f"\n[ERROR] Failed to install {model_name}")
+            except subprocess.TimeoutExpired:
+                click.echo("\n[ERROR] Installation timed out")
+            except Exception as e:
+                click.echo(f"\n[ERROR] {str(e)}")
+        
+        elif choice == 4:
+            # List models
+            if not check_ollama_installed():
+                click.echo("\n[ERROR] Ollama is not installed")
+                continue
+            
+            click.echo("\nFetching installed models...")
+            models = tool.get_ollama_models()
+            
+            if models:
+                click.echo(f"\nInstalled models ({len(models)}):")
+                click.echo("-"*50)
+                for i, model in enumerate(models, 1):
+                    click.echo(f"{i}. {model}")
+                click.echo("-"*50)
+            else:
+                click.echo("\n[WARNING] No models installed")
+                click.echo("\nTo install a model, choose option 3")
+                click.echo("Recommended: phi4")
+
+
+def browse_downloads_folder() -> Optional[str]:
     """Browse and select a file from the Downloads folder."""
     downloads_path = Path.home() / "Downloads"
     
