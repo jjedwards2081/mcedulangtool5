@@ -970,7 +970,7 @@ Provide a clear, concise analysis:"""
                 - operation: str (required) - One of: 'strip', 'analyze', 'improve', 'quiz', 'ai_analyze'
                 - input_file: str (required) - Path to input file (.mcworld/.mctemplate/.lang)
                 - cache_dir: str (optional) - Cache directory path
-                - output_file: str (optional) - Custom output file path
+                - output_file: str (optional) - Output file path (usage varies by operation)
                 - model_name: str (optional) - Ollama model for AI operations
                 - target_age: int (optional) - Target age for improvement/quiz
                 
@@ -1014,23 +1014,35 @@ Provide a clear, concise analysis:"""
             return {'error': f'Unsupported file type: {input_path.suffix}'}
         
         # Execute requested operation
+        result = None
+        
         if operation == 'strip':
             output_path = Path(config.get('output_file', str(lang_file.parent / 'output_player_only.lang')))
             removed = self.strip_non_player_text(lang_file, output_path)
-            return {
+            abs_path = output_path.resolve()
+            print(f"Stripped .lang file saved to: {abs_path}")
+            result = {
                 'operation': 'strip',
-                'output_file': str(output_path),
+                'output_file': str(abs_path),
                 'removed_lines': removed,
                 'success': True
             }
         
         elif operation == 'analyze':
             analysis = self.analyze_text_complexity(lang_file)
-            return {
+            result = {
                 'operation': 'analyze',
                 'analysis': analysis,
                 'success': 'error' not in analysis
             }
+            # Write JSON result to file if specified
+            if 'output_file' in config:
+                output_path = Path(config['output_file'])
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, indent=2)
+                abs_path = output_path.resolve()
+                print(f"Analysis results saved to: {abs_path}")
         
         elif operation == 'improve':
             model_name = config.get('model_name', 'phi4')
@@ -1040,27 +1052,44 @@ Provide a clear, concise analysis:"""
             result = self.improve_text_for_age(lang_file, model_name, target_age, output_path)
             result['operation'] = 'improve'
             result['success'] = 'error' not in result
-            return result
+            if output_path and 'error' not in result:
+                abs_path = output_path.resolve()
+                print(f"Improved .lang file saved to: {abs_path}")
         
         elif operation == 'quiz':
             model_name = config.get('model_name', 'phi4')
             target_age = config.get('target_age', 10)
-            output_dir = Path(config['output_dir']) if 'output_dir' in config else None
+            output_dir = Path(config['output_file']).parent if 'output_file' in config else None
             
             result = self.generate_quiz(lang_file, model_name, target_age, output_dir)
             result['operation'] = 'quiz'
             result['success'] = 'error' not in result
-            return result
+            if 'error' not in result and 'quiz_file' in result:
+                abs_quiz = Path(result['quiz_file']).resolve()
+                abs_answers = Path(result['answer_key_file']).resolve()
+                print(f"Quiz saved to: {abs_quiz}")
+                print(f"Answer key saved to: {abs_answers}")
         
         elif operation == 'ai_analyze':
             model_name = config.get('model_name', 'phi4')
             result = self.analyze_with_ollama(lang_file, model_name)
             result['operation'] = 'ai_analyze'
             result['success'] = 'error' not in result
-            return result
+            # Write JSON result to file if specified
+            if 'output_file' in config:
+                output_path = Path(config['output_file'])
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, indent=2)
+                abs_path = output_path.resolve()
+                print(f"AI analysis results saved to: {abs_path}")
         
         else:
-            return {'error': f'Unknown operation: {operation}'}
+            result = {'error': f'Unknown operation: {operation}'}
+        
+        return result
+    
+
 
 
 if __name__ == "__main__":
@@ -1076,8 +1105,10 @@ if __name__ == "__main__":
         print("  - input_file: Path to .lang, .mcworld, or .mctemplate file", file=sys.stderr)
         print("\nOptional JSON parameters:", file=sys.stderr)
         print("  - cache_dir: Cache directory (default: .mc_lang_cache)", file=sys.stderr)
-        print("  - output_file: Output file path (for strip/improve operations)", file=sys.stderr)
-        print("  - output_dir: Output directory (for quiz operation)", file=sys.stderr)
+        print("  - output_file: Output file path (usage varies by operation):", file=sys.stderr)
+        print("      * analyze/ai_analyze: JSON results file", file=sys.stderr)
+        print("      * strip/improve: Output .lang file", file=sys.stderr)
+        print("      * quiz: Directory for quiz files", file=sys.stderr)
         print("  - model_name: Ollama model name (default: phi4)", file=sys.stderr)
         print("  - target_age: Target age for improve/quiz (default: 10)", file=sys.stderr)
         sys.exit(1)
@@ -1085,9 +1116,17 @@ if __name__ == "__main__":
     # Get JSON config from first and only argument
     config_json = sys.argv[1]
     
+    # Parse config to check if output_file is specified
+    try:
+        config = json.loads(config_json)
+        has_output_file = 'output_file' in config
+    except json.JSONDecodeError:
+        has_output_file = False
+    
     # Initialize tool and process
     tool = MinecraftLangTool()
     result = tool.process_from_config(config_json)
     
-    # Print results as formatted JSON to stdout
-    print(json.dumps(result, indent=2))
+    # Print results to stdout only if output_file was not specified
+    if not has_output_file:
+        print(json.dumps(result, indent=2))
