@@ -169,30 +169,12 @@ class MinecraftLangTool:
     
     def strip_non_player_text(self, lang_path: Path, output_path: Path) -> int:
         """
-        Strip non-player-facing text from lang file, keeping only player-visible strings.
+        Copy lang file, removing only comments and empty lines.
         
-        Common patterns to keep:
-        - UI text (tile., item., entity., etc.)
-        - Messages and descriptions
-        - Menu items
-        
-        Common patterns to remove:
-        - Developer comments
-        - Internal keys
-        - Debug strings
+        Keeps all key-value entries from the original file.
         """
         kept_lines = []
         removed_count = 0
-        
-        # Patterns that typically indicate player-facing content
-        player_facing_prefixes = [
-            'tile.', 'item.', 'entity.', 'effect.', 'enchantment.',
-            'menu.', 'gui.', 'options.', 'death.', 'chat.',
-            'commands.', 'gameMode.', 'difficulty.', 'multiplayer.',
-            'structure_block.', 'jigsaw_block.', 'advancements.',
-            'stat.', 'container.', 'key.', 'subtitles.', 'book.',
-            'biome.', 'block.', 'potion.', 'attribute.'
-        ]
         
         try:
             with open(lang_path, 'r', encoding='utf-8') as f:
@@ -204,14 +186,11 @@ class MinecraftLangTool:
         for line in lines:
             stripped = line.strip()
             if not stripped or stripped.startswith('#'):
+                removed_count += 1
                 continue
             
             if '=' in stripped:
-                key = stripped.split('=')[0].strip()
-                if any(key.startswith(prefix) for prefix in player_facing_prefixes):
-                    kept_lines.append(line)
-                else:
-                    removed_count += 1
+                kept_lines.append(line)
         
         # Write output
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -223,18 +202,6 @@ class MinecraftLangTool:
         """Get a preview of text that will be analyzed for complexity."""
         text_values = []
         
-        player_facing_prefixes = [
-            'death.', 'chat.', 'book.', 'sign.',
-            'menu.', 'gui.', 'options.',
-            'gameMode.', 'difficulty.', 'multiplayer.',
-            'advancements.', 'subtitle.',
-            'entity.', 'effect.', 'enchantment.',
-            'tile.', 'item.', 'block.',
-            'biome.', 'potion.', 'attribute.',
-            'container.', 'structure_block.', 'jigsaw_block.',
-            'stat.', 'commands.',
-        ]
-        
         try:
             with open(lang_path, 'r', encoding='utf-8') as f:
                 for i, line in enumerate(f):
@@ -243,10 +210,9 @@ class MinecraftLangTool:
                     line = line.strip()
                     if '=' in line and not line.startswith('#'):
                         key, value = line.split('=', 1)
-                        if any(key.strip().startswith(prefix) for prefix in player_facing_prefixes):
-                            cleaned = self._clean_text_for_analysis(value)
-                            if cleaned:
-                                text_values.append(cleaned)
+                        cleaned = self._clean_text_for_analysis(value)
+                        if cleaned:
+                            text_values.append(cleaned)
         except UnicodeDecodeError:
             with open(lang_path, 'r', encoding='latin-1') as f:
                 for i, line in enumerate(f):
@@ -255,16 +221,15 @@ class MinecraftLangTool:
                     line = line.strip()
                     if '=' in line and not line.startswith('#'):
                         key, value = line.split('=', 1)
-                        if any(key.strip().startswith(prefix) for prefix in player_facing_prefixes):
-                            cleaned = self._clean_text_for_analysis(value)
-                            if cleaned:
-                                text_values.append(cleaned)
+                        cleaned = self._clean_text_for_analysis(value)
+                        if cleaned:
+                            text_values.append(cleaned)
         
         return text_values
     
     def analyze_text_complexity(self, lang_path: Path) -> Dict:
         """
-        Perform comprehensive text complexity analysis on player-facing text.
+        Perform comprehensive text complexity analysis on all text in the lang file.
         
         Uses multiple established readability formulas to assess the reading level
         of game text. Particularly useful for educators to determine if content
@@ -273,22 +238,9 @@ class MinecraftLangTool:
         Returns:
             dict: Comprehensive analysis including all readability scores
         """
-        # Extract player-facing text values only
+        # Extract all text values
         text_values = []
         skipped_technical = 0
-        
-        # Prioritize the most user-facing content
-        player_facing_prefixes = [
-            'death.', 'chat.', 'book.', 'sign.',
-            'menu.', 'gui.', 'options.',
-            'gameMode.', 'difficulty.', 'multiplayer.',
-            'advancements.', 'subtitle.',
-            'entity.', 'effect.', 'enchantment.',
-            'tile.', 'item.', 'block.',
-            'biome.', 'potion.', 'attribute.',
-            'container.', 'structure_block.', 'jigsaw_block.',
-            'stat.', 'commands.',
-        ]
         
         try:
             with open(lang_path, 'r', encoding='utf-8') as f:
@@ -312,13 +264,12 @@ class MinecraftLangTool:
                             skipped_technical += 1
                             continue
                         
-                        if any(key.startswith(prefix) for prefix in player_facing_prefixes):
-                            # Clean the text value
-                            cleaned = self._clean_text_for_analysis(value)
-                            if cleaned and len(cleaned.split()) >= 2:
-                                text_values.append(cleaned)
-                            else:
-                                skipped_technical += 1
+                        # Clean the text value
+                        cleaned = self._clean_text_for_analysis(value)
+                        if cleaned and len(cleaned.split()) >= 2:
+                            text_values.append(cleaned)
+                        else:
+                            skipped_technical += 1
         except UnicodeDecodeError:
             with open(lang_path, 'r', encoding='latin-1') as f:
                 for line in f:
@@ -339,15 +290,14 @@ class MinecraftLangTool:
                             skipped_technical += 1
                             continue
                         
-                        if any(key.startswith(prefix) for prefix in player_facing_prefixes):
-                            cleaned = self._clean_text_for_analysis(value)
-                            if cleaned and len(cleaned.split()) >= 2:
-                                text_values.append(cleaned)
-                            else:
-                                skipped_technical += 1
+                        cleaned = self._clean_text_for_analysis(value)
+                        if cleaned and len(cleaned.split()) >= 2:
+                            text_values.append(cleaned)
+                        else:
+                            skipped_technical += 1
         
         if not text_values:
-            return {"error": "No player-facing text found"}
+            return {"error": "No analyzable text found"}
         
         # Initialize analysis dictionary
         analysis = {
