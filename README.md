@@ -26,12 +26,27 @@ A Python CLI application for extracting and processing Minecraft `.lang` files f
 pip install -r requirements.txt
 ```
 
-3. (Optional) Install Ollama for AI features:
-   - **Easy way**: Use the built-in Settings menu (Option 9) for guided installation
-   - **Manual way**: 
+3. (Optional) Configure AI provider for AI features:
+
+   The tool supports multiple AI providers through the OpenAI-compatible API:
+
+   - **Ollama** (local, free) - Recommended for getting started
+
      - Download from https://ollama.ai
      - Pull the recommended model: `ollama pull phi4` (best for educational content)
      - Alternative models: `ollama pull llama3.2` or `ollama pull gemma3:1b`
+
+   - **OpenAI** (cloud, paid) - For production use
+
+     - Sign up at https://platform.openai.com
+     - Get an API key
+     - Models: `gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`
+
+   - **Azure AI Foundry** (cloud, enterprise)
+     - Set up an Azure OpenAI resource
+     - Deploy a model and get your endpoint
+
+   See [API_CONFIGURATION.md](API_CONFIGURATION.md) for detailed setup instructions.
 
 ## Quick Start
 
@@ -51,6 +66,7 @@ python minecraft_lang_tool.py process <file>
 ```
 
 Examples:
+
 ```bash
 # Process a .mcworld file
 python minecraft_lang_tool.py process myworld.mcworld
@@ -79,13 +95,17 @@ python minecraft_lang_tool.py process myworld.mcworld --cache-dir custom_cache
 Once you've selected a lang file, you can choose from:
 
 ### 1. Strip Non-Player-Facing Text
+
 Removes internal/debug strings, keeping only player-visible content
+
 - Output saved as `<filename>_player_only.lang`
 - Shows how many lines were removed
 - Preview the result before saving
 
 ### 2. Text Complexity Analysis
+
 Comprehensive readability assessment with multiple metrics:
+
 - **Flesch Reading Ease**: 0-100 scale (higher = easier)
 - **Flesch-Kincaid Grade Level**: U.S. grade level
 - **Gunning Fog Index**: Years of education needed
@@ -94,6 +114,7 @@ Comprehensive readability assessment with multiple metrics:
 - **Automated Readability Index**: Alternative grade level
 
 Provides:
+
 - Grade level recommendations
 - Age range estimates
 - Difficulty assessment
@@ -103,7 +124,9 @@ Provides:
 **Note**: Optimized for English (en_US) text. Non-English files will show a warning.
 
 ### 3. Create Game Context File
+
 Build a knowledge base about your game through AI-guided questions:
+
 - AI generates 5 relevant questions about your game
 - Captures your answers interactively
 - Creates consolidated context summary
@@ -111,6 +134,7 @@ Build a knowledge base about your game through AI-guided questions:
 - Stored as `<filename>_context.txt` for reuse
 
 **How it works**:
+
 1. AI analyzes game text samples
 2. Generates 5 targeted questions about:
    - Educational topic/subject matter
@@ -125,7 +149,9 @@ Build a knowledge base about your game through AI-guided questions:
 **Requires**: Ollama installed with at least one model (phi4 recommended)
 
 ### 4. AI Content Analysis
+
 Analyze game content using local Ollama models:
+
 - Automatically detects available models
 - Summarizes game theme and features
 - Identifies educational focus
@@ -136,7 +162,9 @@ Analyze game content using local Ollama models:
 **Requires**: Ollama installed with at least one model
 
 ### 5. AI Text Improvement for Target Age
+
 Improve text line-by-line to match a specific reading level:
+
 - Choose target age (e.g., 8, 10, 12)
 - AI suggests improvements for each line
 - **User controls every change**:
@@ -151,6 +179,7 @@ Improve text line-by-line to match a specific reading level:
   - Status (AI/User Edited/Rejected)
 
 **Features**:
+
 - Context-aware: Skips labels (1-2 words), adjusts for text length
 - No technical references in improvements
 - Real-time progress with elapsed time
@@ -158,7 +187,9 @@ Improve text line-by-line to match a specific reading level:
 - **Enhanced with context file** if available
 
 ### 6. Generate Quiz from Game Narrative
+
 Create educational quizzes from game content:
+
 - 10 multiple choice questions
 - Age-appropriate language
 - Based on game story and educational elements
@@ -167,19 +198,24 @@ Create educational quizzes from game content:
 - Focuses on gameplay narrative
 
 **Output**:
+
 - Quiz file: `<filename>_quiz_age<X>.txt`
 - Answer key: `<filename>_quiz_age<X>_answers.txt`
 - Saved in `quizzes/` folder
 - **Enhanced with context file** if available
 
 ### 7. View Full File Contents
+
 Display the entire lang file with pagination
 
 ### 8. Get File Statistics
+
 Line counts, file size, and content type breakdown
 
 ### 9. Settings
+
 Manage Ollama installation and configuration:
+
 - **Check Ollama installation**: Verify if Ollama is installed and get version info
 - **Install Ollama**: Get platform-specific installation instructions
   - macOS: Download or Homebrew instructions
@@ -190,6 +226,7 @@ Manage Ollama installation and configuration:
 - **List installed models**: View all available models on your system
 
 **Features**:
+
 - Automatic Ollama detection
 - Platform-specific instructions (macOS, Linux, Windows)
 - Direct model installation from the tool
@@ -230,16 +267,20 @@ mcedulangtool5/
 ## How It Works
 
 ### Archive Extraction
+
 `.mcworld` and `.mctemplate` files are ZIP archives. The tool extracts them to a cache directory and searches recursively for `.lang` files.
 
 ### Lang File Discovery
+
 - Searches for all `.lang` files in the archive
 - Prioritizes en_US English files first
 - Shows file sizes to help identify the main file
 - Allows selection of alternative files if needed
 
 ### Text Filtering
+
 Keeps entries with player-facing prefixes like:
+
 - `death.*`, `chat.*`, `book.*` - Player messages
 - `menu.*`, `gui.*` - UI elements
 - `tile.*`, `item.*`, `block.*` - Game objects
@@ -248,7 +289,9 @@ Keeps entries with player-facing prefixes like:
 - Custom keys from educational worlds
 
 ### Text Cleaning
+
 Automatically removes for analysis:
+
 - Minecraft formatting codes (§, color codes)
 - Format placeholders (%s, {0}, etc.)
 - Technical identifiers (`:_input_key.:`)
@@ -256,6 +299,7 @@ Automatically removes for analysis:
 - Inline comments (#, ##)
 
 ### AI Processing
+
 - **Content Analysis**: Sends text samples to Ollama (300s timeout)
 - **Text Improvement**: Processes line-by-line (60s per line timeout)
   - Skips 1-2 word entries (labels/titles)
@@ -268,6 +312,7 @@ Automatically removes for analysis:
   - Multiple choice format with 4 options
 
 ### Caching System
+
 - Extracted archives stored in `.mc_lang_cache/`
 - Organized by world/pack name
 - Speeds up repeated operations
@@ -276,11 +321,13 @@ Automatically removes for analysis:
 ## Tips for Best Results
 
 ### For Text Analysis
+
 - Works best with English (en_US) files
 - Automatically detects and warns for other languages
 - Supports custom world key formats
 
 ### For AI Features
+
 - **Recommended: `phi4`** - Best choice for educational content
   - Optimized for instruction-following and educational text
   - Excellent balance of speed and quality
@@ -290,14 +337,16 @@ Automatically removes for analysis:
   - `gemma3:1b` - Very fast, lighter analysis
 - **Larger models** (20B+): Better analysis but slower
   - `gpt-oss:20b` - High quality improvements, more computational resources
-  
+
 ### For Text Improvement
+
 - Choose appropriate target age for your audience
 - Review AI suggestions - you have full control
 - Use **Edit** option to customize suggestions
 - Check the changelog for a summary of all changes
 
 ### For Quiz Generation
+
 - Best with worlds that have rich narratives
 - Educational worlds produce the best questions
 - Answer key saved separately for teacher use
@@ -305,24 +354,29 @@ Automatically removes for analysis:
 ## Example Workflow
 
 ### Recommended: Start with Context File
+
 For best AI results, create a context file first:
 
 1. **Extract and select file**:
+
    ```bash
    python minecraft_lang_tool.py process Sustainability_City.mcworld
    ```
 
 2. **Create game context** (Option 3):
+
    - AI generates 5 questions about your game
    - Answer questions interactively
    - Context saved and used for all future AI operations
    - **Do this first for best results!**
 
 3. **Analyze text complexity** (Option 2):
+
    - Check reading level
    - Identify if improvements needed
 
 4. **Improve text for target age** (Option 5):
+
    - Set target age (e.g., 10)
    - Context automatically enhances improvements
    - Review each suggestion
@@ -336,37 +390,81 @@ For best AI results, create a context file first:
    - Use for classroom assessment
 
 ### Alternative: Without Context File
+
 You can skip the context file creation (Option 3) and use AI features directly, but results will be less tailored to your specific game content.
 
 ## Troubleshooting
 
 ### No Ollama models found
+
 - **Easiest solution**: Use Settings menu (Option 9)
   - Check if Ollama is installed
   - Get installation instructions for your platform
   - Install models directly from the tool
-- **Manual solution**: 
+- **Manual solution**:
   - Install Ollama from https://ollama.ai
   - Pull a model: `ollama pull phi4`
   - Verify: `ollama list`
 
 ### Timeout errors during AI processing
+
 - Use a smaller/faster model
 - Check Ollama is running: `ollama serve`
 - Reduce text complexity if possible
 
 ### Wrong language detected
+
 - Tool prioritizes en_US files automatically
 - Select correct file from the list if needed
 - Some custom worlds use non-standard key formats (supported)
 
 ### Cache issues
+
 - Clear cache: `python minecraft_lang_tool.py clear-cache`
 - Or manually delete `.mc_lang_cache/` folder
+
+## AI Provider Configuration
+
+The tool now uses a unified API interface that supports multiple AI providers:
+
+### Using Ollama (Local)
+
+```python
+from minecraft_lang_tool.core import MinecraftLangTool
+
+tool = MinecraftLangTool(
+    api_key="ollama",
+    base_url="http://localhost:11434/v1"
+)
+```
+
+### Using OpenAI (Cloud)
+
+```python
+tool = MinecraftLangTool(
+    api_key="sk-proj-...",
+    base_url=None  # Uses OpenAI default
+)
+```
+
+### Using Azure AI Foundry
+
+```python
+tool = MinecraftLangTool(
+    api_key="your-azure-key",
+    base_url="https://your-endpoint.openai.azure.com/"
+)
+```
+
+For detailed configuration examples, see:
+
+- [API_CONFIGURATION.md](API_CONFIGURATION.md) - Complete configuration guide
+- [examples_api_usage.py](examples_api_usage.py) - Working code examples
 
 ## Future Enhancements
 
 Potential additions:
+
 - Translation comparison between language files
 - Missing key detection
 - Batch processing of multiple files
@@ -401,5 +499,6 @@ SOFTWARE.
 ## Author
 
 **Justin Edwards**
+
 - Email: jnredwards@gmail.com
 - Created for processing Minecraft Education Edition worlds and enhancing educational content accessibility

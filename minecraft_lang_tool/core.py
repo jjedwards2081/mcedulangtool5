@@ -16,10 +16,10 @@ import re
 import json
 import time
 import zipfile
-import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 from collections import Counter
+from openai import OpenAI
 
 
 class MinecraftLangTool:
@@ -32,15 +32,34 @@ class MinecraftLangTool:
     - Analyze text complexity and readability
     - Improve text for specific target ages using AI
     - Generate educational quizzes from game content
-    - Analyze content themes using Ollama AI models
+    - Analyze content themes using AI models (Ollama, OpenAI, Azure AI Foundry)
     
     Designed to work with JSON configuration for Regolith integration.
+    Uses OpenAI-compatible API for AI operations, supporting multiple providers.
     """
     
-    def __init__(self, cache_dir: str = ".mc_lang_cache"):
-        """Initialize the Minecraft Language Tool with a cache directory."""
+    def __init__(self, cache_dir: str = ".mc_lang_cache", 
+                 api_key: Optional[str] = None,
+                 base_url: Optional[str] = None):
+        """Initialize the Minecraft Language Tool with a cache directory.
+        
+        Args:
+            cache_dir: Directory for caching extracted archives
+            api_key: API key for OpenAI/Azure AI. If None, uses environment variable.
+                     For Ollama, set to any non-empty string (e.g., 'ollama')
+            base_url: Base URL for API endpoint. Examples:
+                      - Ollama: 'http://localhost:11434/v1'
+                      - OpenAI: None (uses default)
+                      - Azure AI Foundry: 'https://<your-endpoint>.openai.azure.com/'
+        """
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize OpenAI client with configurable endpoint
+        self.client = OpenAI(
+            api_key=api_key or "ollama",  # Ollama doesn't require a real key
+            base_url=base_url or "http://localhost:11434/v1"  # Default to Ollama
+        )
     
     @staticmethod
     def sanitize_filename(filename: str) -> str:
@@ -584,31 +603,16 @@ class MinecraftLangTool:
         else:
             return "Very Difficult - Advanced"
     
-    def get_ollama_models(self) -> List[str]:
-        """Get list of available Ollama models."""
+    def get_available_models(self) -> List[str]:
+        """Get list of available models from the configured endpoint.
+        
+        Returns:
+            List of model names available at the endpoint
+        """
         try:
-            result = subprocess.run(
-                ['ollama', 'list'],
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                timeout=10
-            )
-            
-            if result.returncode != 0:
-                return []
-            
-            lines = result.stdout.strip().split('\n')
-            models = []
-            
-            for line in lines[1:]:
-                if line.strip():
-                    model_name = line.split()[0]
-                    models.append(model_name)
-            
-            return models
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+            models_response = self.client.models.list()
+            return [model.id for model in models_response.data]
+        except Exception:
             return []
     
     def improve_text_for_age(self, lang_path: Path, model_name: str, target_age: int, 
@@ -693,7 +697,7 @@ class MinecraftLangTool:
             
             lines_processed += 1
             
-            # Create prompt for Ollama to improve this specific text
+            # Create prompt to improve this specific text
             prompt = f"""You are helping to rewrite game text to be more appropriate and engaging for a {target_age}-year-old audience.
 
 Original text: {value}
@@ -707,17 +711,17 @@ Please rewrite this text to be:
 Provide ONLY the improved text, nothing else. No explanations, no quotes, just the improved text."""
 
             try:
-                result = subprocess.run(
-                    ['ollama', 'run', model_name, prompt],
-                    capture_output=True,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    timeout=60
+                response = self.client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=200
                 )
                 
-                if result.returncode == 0:
-                    improved_value = result.stdout.strip()
+                if response.choices and len(response.choices) > 0:
+                    improved_value = response.choices[0].message.content.strip()
                     
                     # Only use improvement if it's reasonable (not empty, not too long)
                     if improved_value and len(improved_value) > 0 and len(improved_value) < len(value) * 2:
@@ -738,16 +742,12 @@ Provide ONLY the improved text, nothing else. No explanations, no quotes, just t
                         improved_lines.append(line)
                         lines_unchanged += 1
                 else:
-                    # Keep original on error
+                    # Keep original if no valid response
                     improved_lines.append(line)
                     lines_unchanged += 1
             
-            except subprocess.TimeoutExpired:
-                # Keep original on timeout
-                improved_lines.append(line)
-                lines_unchanged += 1
             except Exception:
-                # Keep original on any error
+                # Keep original on any error (timeout, API error, etc.)
                 improved_lines.append(line)
                 lines_unchanged += 1
         
@@ -848,27 +848,23 @@ ANSWER KEY:
 10. [Letter]"""
 
         try:
-            result = subprocess.run(
-                ['ollama', 'run', model_name, prompt],
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                timeout=300
+            response = self.client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=2000
             )
             
-            if result.returncode != 0:
-                return {'error': f"Ollama failed: {result.stderr}"}
+            if not response.choices or len(response.choices) == 0:
+                return {'error': "No response from AI model"}
             
-            quiz_content = result.stdout.strip()
+            quiz_content = response.choices[0].message.content.strip()
             
             if not quiz_content or len(quiz_content) < 100:
                 return {'error': "Quiz generation produced invalid output"}
         
-        except subprocess.TimeoutExpired:
-            return {'error': "Quiz generation timed out"}
-        except FileNotFoundError:
-            return {'error': "Ollama not found"}
         except Exception as e:
             return {'error': f"Failed to generate quiz: {str(e)}"}
         
@@ -910,8 +906,11 @@ ANSWER KEY:
             'answer_key_file': str(answer_key_path)
         }
     
-    def analyze_with_ollama(self, lang_path: Path, model: str) -> Dict:
-        """Use Ollama to analyze game content from player-facing text."""
+    def analyze_with_ai(self, lang_path: Path, model: str) -> Dict:
+        """Use AI to analyze game content from player-facing text.
+        
+        Works with Ollama, OpenAI, or Azure AI Foundry depending on client configuration.
+        """
         text_samples = []
         skip_prefixes = ['debug.', 'key.keyboard.', 'translation.test.', 'generator.']
         
@@ -956,41 +955,30 @@ Language file entries:
 Provide a clear, concise analysis:"""
 
         try:
-            result = subprocess.run(
-                ['ollama', 'run', model],
-                input=prompt,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                timeout=300
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1000
             )
             
-            if result.returncode != 0:
+            if not response.choices or len(response.choices) == 0:
                 return {
-                    "error": f"Ollama failed: {result.stderr}",
+                    "error": "No response from AI model",
                     "samples_analyzed": len(text_samples)
                 }
             
             return {
                 "model": model,
                 "samples_analyzed": len(text_samples),
-                "analysis": result.stdout.strip()
+                "analysis": response.choices[0].message.content.strip()
             }
             
-        except subprocess.TimeoutExpired:
-            return {
-                "error": "Ollama request timed out (5 minute limit)",
-                "samples_analyzed": len(text_samples)
-            }
-        except FileNotFoundError:
-            return {
-                "error": "Ollama not found",
-                "samples_analyzed": len(text_samples)
-            }
         except Exception as e:
             return {
-                "error": f"Unexpected error: {str(e)}",
+                "error": f"AI request failed: {str(e)}",
                 "samples_analyzed": len(text_samples)
             }
     
@@ -1007,8 +995,10 @@ Provide a clear, concise analysis:"""
                 - input_file: str (required) - Path to input file (.mcworld/.mctemplate/.lang)
                 - cache_dir: str (optional) - Cache directory path
                 - output_file: str (optional) - Output file path (usage varies by operation)
-                - model_name: str (optional) - Ollama model for AI operations
+                - model_name: str (optional) - AI model for AI operations
                 - target_age: int (optional) - Target age for improvement/quiz
+                - api_key: str (optional) - API key for OpenAI/Azure AI
+                - base_url: str (optional) - Base URL for API endpoint
                 
         Returns:
             dict: Results of the operation including output paths and statistics
@@ -1028,6 +1018,13 @@ Provide a clear, concise analysis:"""
         if 'cache_dir' in config:
             self.cache_dir = Path(config['cache_dir'])
             self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Update API configuration if provided
+        if 'api_key' in config or 'base_url' in config:
+            self.client = OpenAI(
+                api_key=config.get('api_key', 'ollama'),
+                base_url=config.get('base_url', 'http://localhost:11434/v1')
+            )
         
         input_path = Path(input_file)
         
@@ -1111,7 +1108,7 @@ Provide a clear, concise analysis:"""
         
         elif operation == 'ai_analyze':
             model_name = config.get('model_name', 'phi4')
-            result = self.analyze_with_ollama(lang_file, model_name)
+            result = self.analyze_with_ai(lang_file, model_name)
             result['operation'] = 'ai_analyze'
             result['success'] = 'error' not in result
             # Write JSON result to file if specified
@@ -1148,8 +1145,14 @@ if __name__ == "__main__":
         print("      * analyze/ai_analyze: JSON results file", file=sys.stderr)
         print("      * strip/improve: Output .lang file", file=sys.stderr)
         print("      * quiz: Directory for quiz files", file=sys.stderr)
-        print("  - model_name: Ollama model name (default: phi4)", file=sys.stderr)
+        print("  - model_name: AI model name (default: phi4)", file=sys.stderr)
         print("  - target_age: Target age for improve/quiz (default: 10)", file=sys.stderr)
+        print("  - api_key: API key for OpenAI/Azure AI (optional, defaults to 'ollama')", file=sys.stderr)
+        print("  - base_url: Base URL for API endpoint (optional, defaults to Ollama local)", file=sys.stderr)
+        print("      Examples:", file=sys.stderr)
+        print("      * Ollama: http://localhost:11434/v1 (default)", file=sys.stderr)
+        print("      * OpenAI: (leave empty for default)", file=sys.stderr)
+        print("      * Azure AI Foundry: https://<endpoint>.openai.azure.com/", file=sys.stderr)
         sys.exit(1)
     
     # Get JSON config from first and only argument

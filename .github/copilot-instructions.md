@@ -2,12 +2,18 @@
 
 ## Project Overview
 
-This is a Python CLI tool for processing Minecraft Education Edition `.lang` files from `.mcworld`/`.mctemplate` archives. It provides text complexity analysis, AI-powered text improvement, and educational quiz generation using local Ollama models.
+This is a Python CLI tool for processing Minecraft Education Edition `.lang` files from `.mcworld`/`.mctemplate` archives. It provides text complexity analysis, AI-powered text improvement, and educational quiz generation using the OpenAI-compatible API (supports Ollama, OpenAI, and Azure AI Foundry).
 
 **Dual Interface Architecture:**
 
 - `minecraft_lang_tool/core.py`: Non-interactive core logic with JSON config API (for Regolith filter integration)
 - `minecraft_lang_tool.py`: Interactive CLI wrapper using Click (for manual use)
+
+**AI Integration:**
+
+- Uses OpenAI Python library for unified API access
+- Supports multiple providers: Ollama (local), OpenAI (cloud), Azure AI Foundry (enterprise)
+- Socket-based communication via HTTP API (no subprocess calls)
 
 ## Key Architectural Patterns
 
@@ -54,6 +60,29 @@ python minecraft_lang_tool.py run --config-json '{"operation":"analyze","input_f
 ollama pull phi4  # Recommended model for educational content
 ```
 
+## AI Provider Integration
+
+The tool uses the OpenAI Python library (`openai>=1.0.0`) which provides a unified interface for:
+
+- **Ollama**: Local models via `http://localhost:11434/v1` endpoint
+- **OpenAI**: Cloud models via default endpoint or custom base URL
+- **Azure AI Foundry**: Enterprise models via Azure endpoint
+
+### Key Implementation Details
+
+1. **Client Initialization**: `MinecraftLangTool.__init__()` creates an `OpenAI` client with configurable `api_key` and `base_url`
+2. **API Calls**: Use `client.chat.completions.create()` instead of subprocess calls
+3. **Model Discovery**: `get_available_models()` uses `client.models.list()` instead of shell commands
+4. **Error Handling**: Unified exception handling for all providers (connection errors, timeouts, rate limits)
+
+### Migration Notes
+
+- **Old**: `subprocess.run(['ollama', 'run', model, prompt])`
+- **New**: `client.chat.completions.create(model=model, messages=[...])`
+- **Benefits**: Multi-provider support, better error handling, connection pooling, standard API
+
+````
+
 ## Critical Conventions
 
 ### Encoding Handling Pattern
@@ -67,7 +96,7 @@ try:
 except UnicodeDecodeError:
     with open(lang_path, 'r', encoding='latin-1') as f:
         # same processing
-```
+````
 
 ### Line Parsing Pattern
 
@@ -101,12 +130,13 @@ The tool is a Regolith filter (Minecraft Bedrock build system). Key files:
 - `minecraft_lang_tool/core.py`: Entry point via `process_from_config(config_json: str)`
 - Operations: `strip`, `analyze`, `improve`, `quiz`, `ai_analyze`
 
-### Ollama AI Integration
+### AI Integration
 
-- Uses `subprocess.run(['ollama', 'run', model_name, prompt])` with 300s timeout
-- Default model: `phi4` (best for educational content)
-- Models checked via `get_ollama_models()` which parses `ollama list` output
-- All AI features are optional - tool works without Ollama for basic operations
+- Uses OpenAI Python library for all AI operations (socket-based, not subprocess)
+- Default model: `phi4` (best for educational content when using Ollama)
+- Models fetched via `get_available_models()` which uses `client.models.list()`
+- All AI features are optional - tool works without AI for basic operations
+- Supports Ollama (local), OpenAI (cloud), Azure AI Foundry (enterprise)
 
 ## Text Complexity Analysis
 
