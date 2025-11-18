@@ -609,9 +609,52 @@ class MinecraftLangTool:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return []
     
+    def _apply_ollama_params(self, model_name: str, ollama_params: Optional[List[str]] = None) -> Dict:
+        """
+        Apply custom parameters to an Ollama model.
+        
+        Args:
+            model_name: Name of the Ollama model
+            ollama_params: List of parameter commands (e.g., ["/set parameter num_gpu 25"])
+            
+        Returns:
+            dict: Result with 'success' boolean and optional 'error' message
+        """
+        if not ollama_params:
+            return {'success': True}
+        
+        try:
+            # Start ollama interactive session with the model and apply parameters
+            commands = '\n'.join(ollama_params) + '\n/exit\n'
+            
+            result = subprocess.run(
+                ['ollama', 'run', model_name],
+                input=commands,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            # Check if parameters were applied (Ollama doesn't return non-zero on param errors)
+            if 'error' in result.stdout.lower() or 'invalid' in result.stdout.lower():
+                return {
+                    'success': False,
+                    'error': f"Parameter application may have failed: {result.stdout[:200]}"
+                }
+            
+            return {'success': True}
+            
+        except subprocess.TimeoutExpired:
+            return {'success': False, 'error': "Timeout while applying Ollama parameters"}
+        except FileNotFoundError:
+            return {'success': False, 'error': "Ollama not found"}
+        except Exception as e:
+            return {'success': False, 'error': f"Failed to apply parameters: {str(e)}"}
+    
     def improve_text_for_age(self, lang_path: Path, model_name: str, target_age: int, 
                             output_path: Optional[Path] = None, 
-                            changelog_path: Optional[Path] = None) -> Dict:
+                            changelog_path: Optional[Path] = None,
+                            ollama_params: Optional[List[str]] = None) -> Dict:
         """
         Use Ollama AI to improve text in lang file for specific target age.
         
@@ -621,10 +664,16 @@ class MinecraftLangTool:
             target_age: Target age for text improvements
             output_path: Optional custom output path
             changelog_path: Optional custom changelog path
+            ollama_params: Optional list of Ollama parameter commands
             
         Returns:
             dict: Results including output files and statistics
         """
+        # Apply Ollama parameters if provided
+        if ollama_params:
+            param_result = self._apply_ollama_params(model_name, ollama_params)
+            if not param_result['success']:
+                return {'error': f"Failed to apply Ollama parameters: {param_result.get('error', 'Unknown error')}"}
         try:
             with open(lang_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
@@ -699,7 +748,8 @@ class MinecraftLangTool:
         }
     
     def generate_quiz(self, lang_path: Path, model_name: str, target_age: int,
-                     output_dir: Optional[Path] = None) -> Dict:
+                     output_dir: Optional[Path] = None,
+                     ollama_params: Optional[List[str]] = None) -> Dict:
         """
         Generate a 10-question multiple choice quiz based on game narrative.
         
@@ -708,10 +758,16 @@ class MinecraftLangTool:
             model_name: Name of the Ollama model to use
             target_age: Target age for quiz language
             output_dir: Optional custom output directory
+            ollama_params: Optional list of Ollama parameter commands
             
         Returns:
             dict: Results including quiz file paths or error
         """
+        # Apply Ollama parameters if provided
+        if ollama_params:
+            param_result = self._apply_ollama_params(model_name, ollama_params)
+            if not param_result['success']:
+                return {'error': f"Failed to apply Ollama parameters: {param_result.get('error', 'Unknown error')}"}
         narrative_texts = []
         
         try:
@@ -923,6 +979,7 @@ Provide a clear, concise analysis:"""
                 - output_file: str (optional) - Output file path (usage varies by operation)
                 - model_name: str (optional) - Ollama model for AI operations
                 - target_age: int (optional) - Target age for improvement/quiz
+                - ollama_params: list[str] (optional) - Ollama parameter commands (e.g., ["/set parameter num_gpu 25"])
                 
         Returns:
             dict: Results of the operation including output paths and statistics
@@ -998,8 +1055,10 @@ Provide a clear, concise analysis:"""
             model_name = config.get('model_name', 'phi4')
             target_age = config.get('target_age', 10)
             output_path = Path(config['output_file']) if 'output_file' in config else None
+            ollama_params = config.get('ollama_params')
             
-            result = self.improve_text_for_age(lang_file, model_name, target_age, output_path)
+            result = self.improve_text_for_age(lang_file, model_name, target_age, output_path, 
+                                              changelog_path=None, ollama_params=ollama_params)
             result['operation'] = 'improve'
             result['success'] = 'error' not in result
             if output_path and 'error' not in result:
@@ -1010,8 +1069,10 @@ Provide a clear, concise analysis:"""
             model_name = config.get('model_name', 'phi4')
             target_age = config.get('target_age', 10)
             output_dir = Path(config['output_file']).parent if 'output_file' in config else None
+            ollama_params = config.get('ollama_params')
             
-            result = self.generate_quiz(lang_file, model_name, target_age, output_dir)
+            result = self.generate_quiz(lang_file, model_name, target_age, output_dir,
+                                       ollama_params=ollama_params)
             result['operation'] = 'quiz'
             result['success'] = 'error' not in result
             if 'error' not in result and 'quiz_file' in result:
@@ -1022,7 +1083,8 @@ Provide a clear, concise analysis:"""
         
         elif operation == 'ai_analyze':
             model_name = config.get('model_name', 'phi4')
-            result = self.analyze_with_ollama(lang_file, model_name)
+            ollama_params = config.get('ollama_params')
+            result = self.analyze_with_ollama(lang_file, model_name, ollama_params=ollama_params)
             result['operation'] = 'ai_analyze'
             result['success'] = 'error' not in result
             # Write JSON result to file if specified
@@ -1061,6 +1123,7 @@ if __name__ == "__main__":
         print("      * quiz: Directory for quiz files", file=sys.stderr)
         print("  - model_name: Ollama model name (default: phi4)", file=sys.stderr)
         print("  - target_age: Target age for improve/quiz (default: 10)", file=sys.stderr)
+        print("  - ollama_params: List of Ollama parameter commands (e.g., [\"/set parameter num_gpu 25\"])", file=sys.stderr)
         sys.exit(1)
     
     # Get JSON config from first and only argument
