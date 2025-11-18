@@ -687,7 +687,7 @@ class MinecraftLangTool:
         if changelog_path is None:
             changelog_dir = lang_path_obj.parent / "improvements"
             changelog_dir.mkdir(exist_ok=True)
-            changelog_filename = sanitized_stem + f"_changelog_age{target_age}.txt"
+            changelog_filename = sanitized_stem + f"_changelog_age_{target_age}.txt"
             changelog_path = changelog_dir / changelog_filename
         
         improved_lines = []
