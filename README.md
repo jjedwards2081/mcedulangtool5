@@ -90,6 +90,25 @@ python minecraft_lang_tool.py clear-cache
 python minecraft_lang_tool.py process myworld.mcworld --cache-dir custom_cache
 ```
 
+### Using different AI providers:
+
+```bash
+# Using Ollama (default)
+python minecraft_lang_tool.py process myworld.mcworld
+
+# Using OpenAI
+python minecraft_lang_tool.py process myworld.mcworld \
+  --api-key "sk-proj-your-key" \
+  --base-url "https://api.openai.com/v1"
+
+# Using Azure AI Foundry
+python minecraft_lang_tool.py process myworld.mcworld \
+  --api-key "your-azure-key" \
+  --base-url "https://your-resource.openai.azure.com/"
+```
+
+For more CLI examples, see [CLI_USAGE_EXAMPLES.md](CLI_USAGE_EXAMPLES.md).
+
 ## Operations Menu
 
 Once you've selected a lang file, you can choose from:

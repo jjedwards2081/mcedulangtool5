@@ -125,7 +125,7 @@ def show_settings_menu(tool):
         
         if ollama_installed:
             # Get available models
-            models = tool.get_ollama_models()
+            models = tool.get_available_models()
             if models:
                 click.echo(f"Available models: {len(models)}")
                 click.echo("   " + ", ".join(models[:5]))
@@ -165,7 +165,7 @@ def show_settings_menu(tool):
                     pass
                 
                 # Check for models
-                models = tool.get_ollama_models()
+                models = tool.get_available_models()
                 if models:
                     click.echo(f"\n[OK] {len(models)} model(s) installed")
                 else:
@@ -227,7 +227,7 @@ def show_settings_menu(tool):
                 continue
             
             click.echo("\nFetching installed models...")
-            models = tool.get_ollama_models()
+            models = tool.get_available_models()
             
             if models:
                 click.echo(f"\nInstalled models ({len(models)}):")
@@ -304,9 +304,9 @@ def display_menu() -> int:
 
 
 def select_ollama_model(tool: MinecraftLangTool) -> str:
-    """Let user select an Ollama model."""
-    click.echo("Checking for available Ollama models...")
-    models = tool.get_ollama_models()
+    """Let user select an AI model."""
+    click.echo("Checking for available AI models...")
+    models = tool.get_available_models()
     
     if not models:
         click.echo("\n⚠️  No Ollama models found!")
@@ -378,9 +378,11 @@ def cli():
 @click.option('--input-file', type=click.Path(exists=True), help='Input file path')
 @click.option('--output-file', type=click.Path(), help='Output file path')
 @click.option('--cache-dir', default='.mc_lang_cache', help='Cache directory')
-@click.option('--model-name', help='Ollama model name')
+@click.option('--model-name', help='AI model name')
 @click.option('--target-age', type=int, help='Target age for improvement/quiz')
-def run(config_file, config_json, operation, input_file, output_file, cache_dir, model_name, target_age):
+@click.option('--api-key', help='API key for AI provider (OpenAI/Azure). Defaults to "ollama" for Ollama.')
+@click.option('--base-url', help='Base URL for AI API endpoint. Examples: http://localhost:11434/v1 (Ollama), https://api.openai.com/v1 (OpenAI), https://your-resource.openai.azure.com/ (Azure)')
+def run(config_file, config_json, operation, input_file, output_file, cache_dir, model_name, target_age, api_key, base_url):
     """
     Run processing with JSON config file, JSON string, or CLI arguments.
     
@@ -394,7 +396,11 @@ def run(config_file, config_json, operation, input_file, output_file, cache_dir,
         # Using CLI arguments
         python minecraft_lang_tool.py run --operation analyze --input-file world.mcworld
     """
-    tool = MinecraftLangTool(cache_dir=cache_dir)
+    tool = MinecraftLangTool(
+        cache_dir=cache_dir,
+        api_key=api_key,
+        base_url=base_url
+    )
     
     if config_json:
         # Use JSON string directly
@@ -442,6 +448,10 @@ def run(config_file, config_json, operation, input_file, output_file, cache_dir,
             config['model_name'] = model_name
         if target_age:
             config['target_age'] = target_age
+        if api_key:
+            config['api_key'] = api_key
+        if base_url:
+            config['base_url'] = base_url
     
     # Process with core module (pass JSON as string)
     click.echo(f"\nProcessing operation: {config['operation']}")
@@ -470,13 +480,19 @@ def run(config_file, config_json, operation, input_file, output_file, cache_dir,
 @click.argument('input_file', type=click.Path(exists=True), required=False)
 @click.option('--cache-dir', default='.mc_lang_cache', help='Directory for caching extracted files')
 @click.option('--downloads', is_flag=True, help='Browse files in Downloads folder')
-def process(input_file, cache_dir, downloads):
+@click.option('--api-key', help='API key for AI provider (OpenAI/Azure). Defaults to "ollama" for Ollama.')
+@click.option('--base-url', help='Base URL for AI API endpoint. Examples: http://localhost:11434/v1 (Ollama), https://api.openai.com/v1 (OpenAI), https://your-resource.openai.azure.com/ (Azure)')
+def process(input_file, cache_dir, downloads, api_key, base_url):
     """
     Interactive mode - Process a Minecraft file with menu-driven interface.
     
     This is the original interactive CLI that guides you through operations.
     """
-    tool = MinecraftLangTool(cache_dir=cache_dir)
+    tool = MinecraftLangTool(
+        cache_dir=cache_dir,
+        api_key=api_key,
+        base_url=base_url
+    )
     
     # If downloads flag is set or no input file provided, browse Downloads
     if downloads or not input_file:
