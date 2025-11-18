@@ -386,13 +386,13 @@ def run(config_file, config_json, operation, input_file, output_file, cache_dir,
     
     Examples:
         # Using config file
-        python cli.py run config.json
+        python minecraft_lang_tool.py run config.json
         
         # Using JSON string
-        python cli.py run --config-json '{"operation":"analyze","input_file":"world.mcworld"}'
+        python minecraft_lang_tool.py run --config-json '{"operation":"analyze","input_file":"world.mcworld"}'
         
         # Using CLI arguments
-        python cli.py run --operation analyze --input-file world.mcworld
+        python minecraft_lang_tool.py run --operation analyze --input-file world.mcworld
     """
     tool = MinecraftLangTool(cache_dir=cache_dir)
     

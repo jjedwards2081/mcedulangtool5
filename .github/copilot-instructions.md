@@ -7,15 +7,15 @@ This is a Python CLI tool for processing Minecraft Education Edition `.lang` fil
 **Dual Interface Architecture:**
 
 - `minecraft_lang_tool/core.py`: Non-interactive core logic with JSON config API (for Regolith filter integration)
-- `cli.py`: Interactive CLI wrapper using Click (for manual use)
+- `minecraft_lang_tool.py`: Interactive CLI wrapper using Click (for manual use)
 
 ## Key Architectural Patterns
 
 ### 1. Separation of Concerns
 
 - **Core module** (`minecraft_lang_tool/core.py`): Pure logic, no `click` dependencies, accepts JSON strings via `process_from_config()`
-- **CLI wrapper** (`cli.py`): Interactive menus, user prompts, settings management - all `click`-dependent code lives here
-- **Rule**: Never add `click.echo()` or `click.prompt()` to core.py - these belong in cli.py
+- **CLI wrapper** (`minecraft_lang_tool.py`): Interactive menus, user prompts, settings management - all `click`-dependent code lives here
+- **Rule**: Never add `click.echo()` or `click.prompt()` to core.py - these belong in minecraft_lang_tool.py
 
 ### 2. File Processing Pipeline
 
@@ -42,13 +42,13 @@ The `_clean_text_for_analysis()` method is critical - it removes Minecraft forma
 ```bash
 # Test compilation (no test suite yet)
 python -m py_compile minecraft_lang_tool/core.py
-python -m py_compile cli.py
+python -m py_compile minecraft_lang_tool.py
 
 # Run CLI interactively
-python cli.py process <file>
+python minecraft_lang_tool.py process <file>
 
 # Run with JSON config (Regolith style)
-python cli.py run --config-json '{"operation":"analyze","input_file":"test.lang"}'
+python minecraft_lang_tool.py run --config-json '{"operation":"analyze","input_file":"test.lang"}'
 
 # Test Ollama integration (requires Ollama installed)
 ollama pull phi4  # Recommended model for educational content
@@ -137,7 +137,7 @@ quizzes/         # Generated quiz files + answer keys
 
 This codebase is split from a monolithic `minecraft_lang_tool.py` file. When merging:
 
-1. Interactive/Click methods go to `cli.py` (e.g., `select_lang_file`, `create_context_file`)
+1. Interactive/Click methods go to `minecraft_lang_tool.py` (e.g., `select_lang_file`, `create_context_file`)
 2. Pure logic goes to `core.py` (e.g., complexity analysis, text cleaning)
 3. Update both `analyze_text_complexity()` and its except block when changing parsing logic
 4. Test both CLI and JSON config interfaces after changes
