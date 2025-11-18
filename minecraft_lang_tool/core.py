@@ -615,21 +615,60 @@ class MinecraftLangTool:
         except Exception:
             return []
     
+    def _load_context_file(self, lang_path: Path) -> Optional[str]:
+        """
+        Load context file if it exists.
+        
+        Args:
+            lang_path: Path to the lang file
+            
+        Returns:
+            Context text if file exists, None otherwise
+        """
+        lang_path_obj = Path(lang_path)
+        context_filename = lang_path_obj.stem + "_context.txt"
+        context_path = lang_path_obj.parent / context_filename
+        
+        if context_path.exists():
+            try:
+                with open(context_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            except Exception:
+                return None
+        return None
+    
     def improve_text_for_age(self, lang_path: Path, model_name: str, target_age: int, 
                             output_path: Optional[Path] = None, 
-                            changelog_path: Optional[Path] = None) -> Dict:
+                            changelog_path: Optional[Path] = None,
+                            auto_accept: bool = False) -> Dict:
         """
         Use Ollama AI to improve text in lang file for specific target age.
         
+        This method processes each line of the language file and uses AI to suggest
+        improvements that make the text more appropriate for the target age group.
+        
+        Features:
+        - Context-aware: Skips short labels (1-2 words)
+        - Smart processing: Vocabulary-only for short text, full improvements for longer text
+        - Real-time logging: Creates detailed changelog with line numbers and status
+        - Auto-accept mode: For non-interactive use (Regolith integration)
+        
         Args:
             lang_path: Path to the lang file to improve
-            model_name: Name of the Ollama model to use
-            target_age: Target age for text improvements
+            model_name: Name of the Ollama model to use (e.g., 'phi4', 'llama3.2')
+            target_age: Target age for text improvements (e.g., 8, 10, 12)
             output_path: Optional custom output path
             changelog_path: Optional custom changelog path
+            auto_accept: If True, automatically accept all AI suggestions without prompts
             
         Returns:
-            dict: Results including output files and statistics
+            dict: Results including:
+                - output_file: Path to improved lang file
+                - changelog_file: Path to detailed changelog
+                - lines_processed: Total lines processed
+                - lines_improved: Number of lines changed
+                - lines_unchanged: Number of lines kept original
+                - error: Error message if processing failed
         """
         try:
             with open(lang_path, 'r', encoding='utf-8') as f:
@@ -648,7 +687,7 @@ class MinecraftLangTool:
         if changelog_path is None:
             changelog_dir = lang_path_obj.parent / "improvements"
             changelog_dir.mkdir(exist_ok=True)
-            changelog_filename = sanitized_stem + f"_changelog_age_{target_age}.txt"
+            changelog_filename = sanitized_stem + f"_changelog_age{target_age}.txt"
             changelog_path = changelog_dir / changelog_filename
         
         improved_lines = []
@@ -656,59 +695,140 @@ class MinecraftLangTool:
         lines_improved = 0
         lines_unchanged = 0
         
-        # Initialize changelog
+        # Initialize changelog file immediately
         try:
             with open(changelog_path, 'w', encoding='utf-8') as f:
-                f.write(f"Text Improvement Changelog - Age {target_age}\n")
+                f.write(f"Text Improvement Changelog for Age {target_age}\n")
                 f.write(f"Model: {model_name}\n")
                 f.write(f"Source: {lang_path}\n")
-                f.write(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write("="*60 + "\n\n")
+                f.write("Processing...\n\n")
+                f.flush()  # Force write to disk
         except Exception as e:
             return {'error': f"Failed to create changelog file: {str(e)}"}
         
-        # Process each line through Ollama
+        # Load context file if available
+        context_text = self._load_context_file(Path(lang_path))
+        context_summary = ""
+        if context_text:
+            # Extract just the summary section
+            if "CONTEXT SUMMARY:" in context_text:
+                context_summary = context_text.split("CONTEXT SUMMARY:")[1].split("="*60)[0].strip()
+                # Keep it concise for the prompt
+                context_summary = context_summary[:300] + "..." if len(context_summary) > 300 else context_summary
+        
+        # Process each line
         for line_num, line in enumerate(lines, 1):
-            stripped = line.strip()
-            
-            # Keep comments and empty lines as-is
-            if not stripped or stripped.startswith('#'):
-                improved_lines.append(line)
-                continue
-            
-            # Check if line contains key=value pair
-            if '=' not in stripped:
-                improved_lines.append(line)
-                continue
-            
-            try:
-                key, value = stripped.split('=', 1)
-                key = key.strip()
-                value = value.strip()
-            except ValueError:
-                improved_lines.append(line)
-                continue
-            
-            # Clean and check if text is worth improving
-            cleaned = self._clean_text_for_analysis(value)
-            if not cleaned or len(cleaned.split()) < 2:
-                improved_lines.append(line)
-                continue
-            
             lines_processed += 1
             
-            # Create prompt to improve this specific text
-            prompt = f"""You are helping to rewrite game text to be more appropriate and engaging for a {target_age}-year-old audience.
+            # Check if line is a comment or empty
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#') or stripped.startswith('//'):
+                improved_lines.append(line)
+                lines_unchanged += 1
+                continue
+            
+            # Check if line contains a key-value pair
+            if '=' not in line:
+                improved_lines.append(line)
+                lines_unchanged += 1
+                continue
+            
+            # Split into key and value
+            parts = line.split('=', 1)
+            if len(parts) != 2:
+                improved_lines.append(line)
+                lines_unchanged += 1
+                continue
+            
+            key = parts[0].strip()
+            value = parts[1].strip()
+            
+            # Skip if value is empty or too short
+            if not value or len(value) < 3:
+                improved_lines.append(line)
+                lines_unchanged += 1
+                continue
+            
+            # Check if this looks like player-facing text
+            # Skip technical entries (no spaces, all caps, numbers only, etc.)
+            if not any(c.isalpha() and c.islower() for c in value):
+                improved_lines.append(line)
+                lines_unchanged += 1
+                continue
+            
+            if value.replace('_', '').replace('.', '').replace('-', '').isalnum() and ' ' not in value:
+                improved_lines.append(line)
+                lines_unchanged += 1
+                continue
+            
+            # Clean value for analysis (remove formatting codes and inline comments)
+            clean_value = re.sub(r'§[0-9a-fk-or]', '', value)
+            clean_value = re.sub(r'%[0-9]+\$?[sd]|%s|%d', '', clean_value)
+            # Remove inline comments that start with # or ##
+            if '#' in clean_value:
+                clean_value = clean_value.split('#')[0].strip()
+            clean_value = clean_value.strip()
+            
+            if len(clean_value) < 3:
+                improved_lines.append(line)
+                lines_unchanged += 1
+                continue
+            
+            # Use AI to evaluate and improve the text
+            # Count words to determine if sentence structure analysis is needed
+            word_count = len(clean_value.split())
+            
+            # Skip very short entries (1-2 words) - they're usually labels/titles
+            if word_count <= 2:
+                improved_lines.append(line)
+                lines_unchanged += 1
+                continue
+            
+            if word_count >= 5:
+                context_prefix = f"\nGame context: {context_summary}\n" if context_summary else ""
+                prompt = f"""You are improving text in a Minecraft educational game for a {target_age}-year-old player.{context_prefix}
 
-Original text: {value}
+Original text: "{clean_value}"
 
-Please rewrite this text to be:
-1. Clear and easy to understand for a {target_age}-year-old
-2. Engaging and interesting
-3. Slightly shorter if possible
-4. Maintaining the original meaning and context
+Task: Improve this text ONLY if it contains difficult vocabulary or complex sentence structure for a {target_age} year old.
 
-Provide ONLY the improved text, nothing else. No explanations, no quotes, just the improved text."""
+Consider BOTH:
+1. Vocabulary: Replace words that are too advanced (e.g., "utilize" → "use", "facilitate" → "help")
+2. Sentence structure: Break up long, complex sentences into shorter, clearer ones
+
+CRITICAL RULES:
+- If text is already simple and clear for age {target_age}: Respond with exactly "KEEP_ORIGINAL"
+- If improvement needed: Provide ONLY the improved text with NO extra commentary
+- Do NOT add explanations, hashtags, word counts, or meta-commentary
+- Do NOT reference word limits or formatting instructions
+- Keep the improved text natural and engaging
+
+Response (either "KEEP_ORIGINAL" or the improved text only):"""
+            else:
+                context_prefix = f"\nGame context: {context_summary}\n" if context_summary else ""
+                prompt = f"""You are improving text in a Minecraft educational game for a {target_age}-year-old player.{context_prefix}
+
+Original text: "{clean_value}"
+
+Task: Check if this SHORT PHRASE contains any difficult vocabulary for a {target_age} year old.
+
+FOCUS: Only simplify vocabulary if words are too advanced. Do NOT expand or add words.
+
+Examples of good changes:
+- "Utilize" → "Use"
+- "Commence" → "Start"  
+- "Facilitate" → "Help"
+
+CRITICAL RULES:
+- If vocabulary is already simple for age {target_age}: Respond with exactly "KEEP_ORIGINAL"
+- If improvement needed: Provide ONLY the improved text with NO additions
+- Do NOT add explanations, hashtags, or meta-commentary
+- Do NOT expand short phrases into longer sentences
+- Keep it concise - same length or shorter than original
+
+Response (either "KEEP_ORIGINAL" or the improved text only):"""
 
             try:
                 response = self.client.chat.completions.create(
@@ -720,31 +840,65 @@ Provide ONLY the improved text, nothing else. No explanations, no quotes, just t
                     max_tokens=200
                 )
                 
-                if response.choices and len(response.choices) > 0:
-                    improved_value = response.choices[0].message.content.strip()
-                    
-                    # Only use improvement if it's reasonable (not empty, not too long)
-                    if improved_value and len(improved_value) > 0 and len(improved_value) < len(value) * 2:
-                        improved_line = f"{key}={improved_value}\n"
-                        improved_lines.append(improved_line)
-                        lines_improved += 1
-                        
-                        # Log to changelog
-                        try:
-                            with open(changelog_path, 'a', encoding='utf-8') as f:
-                                f.write(f"Line {line_num}:\n")
-                                f.write(f"  Original:  {value}\n")
-                                f.write(f"  Improved:  {improved_value}\n\n")
-                        except Exception:
-                            pass
-                    else:
-                        # Keep original if improvement didn't work well
-                        improved_lines.append(line)
-                        lines_unchanged += 1
-                else:
-                    # Keep original if no valid response
+                if not response.choices or len(response.choices) == 0:
                     improved_lines.append(line)
                     lines_unchanged += 1
+                    continue
+                
+                ai_response = response.choices[0].message.content.strip()
+                
+                # Check if AI says to keep original
+                if 'KEEP_ORIGINAL' in ai_response.upper():
+                    improved_lines.append(line)
+                    lines_unchanged += 1
+                else:
+                    # Clean up the response - remove quotes, extra whitespace, emoji
+                    improved_text = ai_response.strip('"\'').strip()
+                    # Remove all emoji characters (comprehensive removal)
+                    improved_text = re.sub(r'[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251]+', '', improved_text)
+                    improved_text = re.sub(r'[😀-🿿]', '', improved_text)
+                    improved_text = re.sub(r'\s+', ' ', improved_text).strip()
+                    # Remove common AI prefixes/suffixes
+                    for phrase in ['Here is', 'Here\'s', 'The improved text is', 'Improved:', 'Keep it', 'Response:']:
+                        if improved_text.startswith(phrase):
+                            improved_text = improved_text[len(phrase):].strip(':').strip()
+                    
+                    # Only accept if it's reasonable (not empty, not too different in length)
+                    if improved_text and len(improved_text) > 0:
+                        length_ratio = len(improved_text) / len(clean_value)
+                        if 0.3 < length_ratio < 3.0:
+                            # Preserve any formatting codes from original
+                            if '§' in value:
+                                format_match = re.match(r'^((?:§[0-9a-fk-or])+)', value)
+                                if format_match:
+                                    improved_text = format_match.group(1) + improved_text
+                            
+                            # Build improved line
+                            improved_line = f"{key}={improved_text}\n"
+                            improved_lines.append(improved_line)
+                            lines_improved += 1
+                            
+                            # Write to changelog immediately with full lines
+                            try:
+                                with open(changelog_path, 'a', encoding='utf-8') as f:
+                                    f.write(f"[LINE {line_num}] {key}\n")
+                                    f.write(f"  ORIGINAL TEXT: {clean_value}\n")
+                                    f.write(f"  IMPROVED TEXT: {improved_text}\n")
+                                    f.write(f"  OLD LINE: {line.rstrip()}\n")
+                                    f.write(f"  NEW LINE: {improved_line.rstrip()}\n")
+                                    f.write(f"  STATUS: ACCEPTED (AI)\n")
+                                    f.write("-" * 60 + "\n\n")
+                                    f.flush()
+                            except Exception:
+                                pass
+                        else:
+                            # Length change too dramatic, keep original
+                            improved_lines.append(line)
+                            lines_unchanged += 1
+                    else:
+                        # Empty response, keep original
+                        improved_lines.append(line)
+                        lines_unchanged += 1
             
             except Exception:
                 # Keep original on any error (timeout, API error, etc.)
@@ -760,15 +914,14 @@ Provide ONLY the improved text, nothing else. No explanations, no quotes, just t
         
         # Finalize changelog
         try:
-            success_rate = (lines_improved/lines_processed*100) if lines_processed > 0 else 0
             with open(changelog_path, 'a', encoding='utf-8') as f:
-                f.write("\n" + "="*60 + "\n")
-                f.write("SUMMARY\n")
                 f.write("="*60 + "\n")
-                f.write(f"Total lines processed: {lines_processed}\n")
+                f.write(f"Processing complete!\n")
+                f.write(f"Total lines: {lines_processed}\n")
                 f.write(f"Lines improved: {lines_improved}\n")
                 f.write(f"Lines unchanged: {lines_unchanged}\n")
-                f.write(f"Success rate: {success_rate:.1f}%\n")
+                if lines_improved == 0:
+                    f.write("\nNo changes made - all text was already appropriate for target age.\n")
         except Exception as e:
             return {'error': f"Failed to finalize changelog: {str(e)}"}
         
