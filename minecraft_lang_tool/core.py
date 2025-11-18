@@ -591,6 +591,8 @@ class MinecraftLangTool:
                 ['ollama', 'list'],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=10
             )
             
@@ -609,52 +611,9 @@ class MinecraftLangTool:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return []
     
-    def _apply_ollama_params(self, model_name: str, ollama_params: Optional[List[str]] = None) -> Dict:
-        """
-        Apply custom parameters to an Ollama model.
-        
-        Args:
-            model_name: Name of the Ollama model
-            ollama_params: List of parameter commands (e.g., ["/set parameter num_gpu 25"])
-            
-        Returns:
-            dict: Result with 'success' boolean and optional 'error' message
-        """
-        if not ollama_params:
-            return {'success': True}
-        
-        try:
-            # Start ollama interactive session with the model and apply parameters
-            commands = '\n'.join(ollama_params) + '\n/exit\n'
-            
-            result = subprocess.run(
-                ['ollama', 'run', model_name],
-                input=commands,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            # Check if parameters were applied (Ollama doesn't return non-zero on param errors)
-            if 'error' in result.stdout.lower() or 'invalid' in result.stdout.lower():
-                return {
-                    'success': False,
-                    'error': f"Parameter application may have failed: {result.stdout[:200]}"
-                }
-            
-            return {'success': True}
-            
-        except subprocess.TimeoutExpired:
-            return {'success': False, 'error': "Timeout while applying Ollama parameters"}
-        except FileNotFoundError:
-            return {'success': False, 'error': "Ollama not found"}
-        except Exception as e:
-            return {'success': False, 'error': f"Failed to apply parameters: {str(e)}"}
-    
     def improve_text_for_age(self, lang_path: Path, model_name: str, target_age: int, 
                             output_path: Optional[Path] = None, 
-                            changelog_path: Optional[Path] = None,
-                            ollama_params: Optional[List[str]] = None) -> Dict:
+                            changelog_path: Optional[Path] = None) -> Dict:
         """
         Use Ollama AI to improve text in lang file for specific target age.
         
@@ -664,16 +623,10 @@ class MinecraftLangTool:
             target_age: Target age for text improvements
             output_path: Optional custom output path
             changelog_path: Optional custom changelog path
-            ollama_params: Optional list of Ollama parameter commands
             
         Returns:
             dict: Results including output files and statistics
         """
-        # Apply Ollama parameters if provided
-        if ollama_params:
-            param_result = self._apply_ollama_params(model_name, ollama_params)
-            if not param_result['success']:
-                return {'error': f"Failed to apply Ollama parameters: {param_result.get('error', 'Unknown error')}"}
         try:
             with open(lang_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
@@ -691,7 +644,7 @@ class MinecraftLangTool:
         if changelog_path is None:
             changelog_dir = lang_path_obj.parent / "improvements"
             changelog_dir.mkdir(exist_ok=True)
-            changelog_filename = sanitized_stem + f"_changelog_age{target_age}.txt"
+            changelog_filename = sanitized_stem + f"_changelog_age_{target_age}.txt"
             changelog_path = changelog_dir / changelog_filename
         
         improved_lines = []
@@ -710,15 +663,93 @@ class MinecraftLangTool:
         except Exception as e:
             return {'error': f"Failed to create changelog file: {str(e)}"}
         
-        # Process lines (simplified for non-interactive mode)
+        # Process each line through Ollama
         for line_num, line in enumerate(lines, 1):
-            if '=' not in line or line.strip().startswith('#'):
+            stripped = line.strip()
+            
+            # Keep comments and empty lines as-is
+            if not stripped or stripped.startswith('#'):
+                improved_lines.append(line)
+                continue
+            
+            # Check if line contains key=value pair
+            if '=' not in stripped:
+                improved_lines.append(line)
+                continue
+            
+            try:
+                key, value = stripped.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+            except ValueError:
+                improved_lines.append(line)
+                continue
+            
+            # Clean and check if text is worth improving
+            cleaned = self._clean_text_for_analysis(value)
+            if not cleaned or len(cleaned.split()) < 2:
                 improved_lines.append(line)
                 continue
             
             lines_processed += 1
-            improved_lines.append(line)
-            lines_unchanged += 1
+            
+            # Create prompt for Ollama to improve this specific text
+            prompt = f"""You are helping to rewrite game text to be more appropriate and engaging for a {target_age}-year-old audience.
+
+Original text: {value}
+
+Please rewrite this text to be:
+1. Clear and easy to understand for a {target_age}-year-old
+2. Engaging and interesting
+3. Slightly shorter if possible
+4. Maintaining the original meaning and context
+
+Provide ONLY the improved text, nothing else. No explanations, no quotes, just the improved text."""
+
+            try:
+                result = subprocess.run(
+                    ['ollama', 'run', model_name, prompt],
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=60
+                )
+                
+                if result.returncode == 0:
+                    improved_value = result.stdout.strip()
+                    
+                    # Only use improvement if it's reasonable (not empty, not too long)
+                    if improved_value and len(improved_value) > 0 and len(improved_value) < len(value) * 2:
+                        improved_line = f"{key}={improved_value}\n"
+                        improved_lines.append(improved_line)
+                        lines_improved += 1
+                        
+                        # Log to changelog
+                        try:
+                            with open(changelog_path, 'a', encoding='utf-8') as f:
+                                f.write(f"Line {line_num}:\n")
+                                f.write(f"  Original:  {value}\n")
+                                f.write(f"  Improved:  {improved_value}\n\n")
+                        except Exception:
+                            pass
+                    else:
+                        # Keep original if improvement didn't work well
+                        improved_lines.append(line)
+                        lines_unchanged += 1
+                else:
+                    # Keep original on error
+                    improved_lines.append(line)
+                    lines_unchanged += 1
+            
+            except subprocess.TimeoutExpired:
+                # Keep original on timeout
+                improved_lines.append(line)
+                lines_unchanged += 1
+            except Exception:
+                # Keep original on any error
+                improved_lines.append(line)
+                lines_unchanged += 1
         
         # Write improved file
         try:
@@ -729,6 +760,7 @@ class MinecraftLangTool:
         
         # Finalize changelog
         try:
+            success_rate = (lines_improved/lines_processed*100) if lines_processed > 0 else 0
             with open(changelog_path, 'a', encoding='utf-8') as f:
                 f.write("\n" + "="*60 + "\n")
                 f.write("SUMMARY\n")
@@ -736,6 +768,7 @@ class MinecraftLangTool:
                 f.write(f"Total lines processed: {lines_processed}\n")
                 f.write(f"Lines improved: {lines_improved}\n")
                 f.write(f"Lines unchanged: {lines_unchanged}\n")
+                f.write(f"Success rate: {success_rate:.1f}%\n")
         except Exception as e:
             return {'error': f"Failed to finalize changelog: {str(e)}"}
         
@@ -748,8 +781,7 @@ class MinecraftLangTool:
         }
     
     def generate_quiz(self, lang_path: Path, model_name: str, target_age: int,
-                     output_dir: Optional[Path] = None,
-                     ollama_params: Optional[List[str]] = None) -> Dict:
+                     output_dir: Optional[Path] = None) -> Dict:
         """
         Generate a 10-question multiple choice quiz based on game narrative.
         
@@ -758,16 +790,10 @@ class MinecraftLangTool:
             model_name: Name of the Ollama model to use
             target_age: Target age for quiz language
             output_dir: Optional custom output directory
-            ollama_params: Optional list of Ollama parameter commands
             
         Returns:
             dict: Results including quiz file paths or error
         """
-        # Apply Ollama parameters if provided
-        if ollama_params:
-            param_result = self._apply_ollama_params(model_name, ollama_params)
-            if not param_result['success']:
-                return {'error': f"Failed to apply Ollama parameters: {param_result.get('error', 'Unknown error')}"}
         narrative_texts = []
         
         try:
@@ -826,6 +852,8 @@ ANSWER KEY:
                 ['ollama', 'run', model_name, prompt],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=300
             )
             
@@ -933,6 +961,8 @@ Provide a clear, concise analysis:"""
                 input=prompt,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=300
             )
             
@@ -979,7 +1009,6 @@ Provide a clear, concise analysis:"""
                 - output_file: str (optional) - Output file path (usage varies by operation)
                 - model_name: str (optional) - Ollama model for AI operations
                 - target_age: int (optional) - Target age for improvement/quiz
-                - ollama_params: list[str] (optional) - Ollama parameter commands (e.g., ["/set parameter num_gpu 25"])
                 
         Returns:
             dict: Results of the operation including output paths and statistics
@@ -1055,24 +1084,23 @@ Provide a clear, concise analysis:"""
             model_name = config.get('model_name', 'phi4')
             target_age = config.get('target_age', 10)
             output_path = Path(config['output_file']) if 'output_file' in config else None
-            ollama_params = config.get('ollama_params')
             
             result = self.improve_text_for_age(lang_file, model_name, target_age, output_path, 
-                                              changelog_path=None, ollama_params=ollama_params)
+                                              changelog_path=None)
             result['operation'] = 'improve'
             result['success'] = 'error' not in result
-            if output_path and 'error' not in result:
-                abs_path = output_path.resolve()
+            if 'error' not in result:
+                abs_path = Path(result['output_file']).resolve()
+                abs_changelog = Path(result['changelog_file']).resolve()
                 print(f"Improved .lang file saved to: {abs_path}")
+                print(f"Changelog saved to: {abs_changelog}")
         
         elif operation == 'quiz':
             model_name = config.get('model_name', 'phi4')
             target_age = config.get('target_age', 10)
             output_dir = Path(config['output_file']).parent if 'output_file' in config else None
-            ollama_params = config.get('ollama_params')
             
-            result = self.generate_quiz(lang_file, model_name, target_age, output_dir,
-                                       ollama_params=ollama_params)
+            result = self.generate_quiz(lang_file, model_name, target_age, output_dir)
             result['operation'] = 'quiz'
             result['success'] = 'error' not in result
             if 'error' not in result and 'quiz_file' in result:
@@ -1083,8 +1111,7 @@ Provide a clear, concise analysis:"""
         
         elif operation == 'ai_analyze':
             model_name = config.get('model_name', 'phi4')
-            ollama_params = config.get('ollama_params')
-            result = self.analyze_with_ollama(lang_file, model_name, ollama_params=ollama_params)
+            result = self.analyze_with_ollama(lang_file, model_name)
             result['operation'] = 'ai_analyze'
             result['success'] = 'error' not in result
             # Write JSON result to file if specified
@@ -1123,7 +1150,6 @@ if __name__ == "__main__":
         print("      * quiz: Directory for quiz files", file=sys.stderr)
         print("  - model_name: Ollama model name (default: phi4)", file=sys.stderr)
         print("  - target_age: Target age for improve/quiz (default: 10)", file=sys.stderr)
-        print("  - ollama_params: List of Ollama parameter commands (e.g., [\"/set parameter num_gpu 25\"])", file=sys.stderr)
         sys.exit(1)
     
     # Get JSON config from first and only argument
